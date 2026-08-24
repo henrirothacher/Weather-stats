@@ -1,0 +1,29 @@
+[theme]
+base = "dark"
+
+# Deep near-black ground with a hint of blue, so the accents read as warm.
+backgroundColor = "#0a0e13"
+secondaryBackgroundColor = "#141c25"
+textColor = "#e8eef5"
+borderColor = "#26333f"
+
+primaryColor = "#fb8500"
+linkColor = "#8ecae6"
+codeBackgroundColor = "#111922"
+
+# Semantic colours, tuned to sit on the dark ground.
+redColor = "#f4645c"
+orangeColor = "#fb8500"
+yellowColor = "#ffb703"
+greenColor = "#7bd88f"
+blueColor = "#8ecae6"
+violetColor = "#c77dff"
+grayColor = "#8b98a5"
+
+# Charts: warm-to-cool spread that matches the wind bands.
+chartCategoricalColors = ["#fb8500", "#8ecae6", "#ffb703", "#219ebc", "#c77dff", "#7bd88f", "#f4645c"]
+chartSequentialColors = ["#0d1b26", "#123044", "#154763", "#166082", "#1279a1", "#2b93b8", "#5cadca", "#8ec6dc", "#c0deec", "#eaf5fb"]
+
+dataframeHeaderBackgroundColor = "#18222d"
+
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
