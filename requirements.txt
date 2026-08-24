@@ -1,0 +1,11 @@
+streamlit
+cdsapi
+xarray
+netcdf4
+matplotlib
+pandas
+numpy
+altair
+streamlit-folium
+folium
+timezonefinder
