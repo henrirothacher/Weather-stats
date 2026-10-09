@@ -1041,46 +1041,6 @@ def rate_location(path, mtime, zone, first_year, activity, windows):
     }
 
 
-@st.cache_data(show_spinner=False)
-def location_facts(path, mtime, zone):
-    """A short profile of the spot, read straight out of its own record."""
-    frame = load_wind(path, mtime, zone)
-    knots = frame["speed"] * MS_TO_KNOTS
-    by_month = knots.groupby(knots.index.month).mean().reindex(range(1, 13))
-    peak_at = knots.idxmax()
-    facts = {
-        "readings": len(frame),
-        "mean": float(knots.mean()),
-        "month_curve": by_month.tolist(),
-        "windiest_month": int(by_month.idxmax()),
-        "calmest_month": int(by_month.idxmin()),
-        "prevailing": prevailing_direction(wind_direction(frame["u10"], frame["v10"])),
-        "peak": float(knots.max()),
-        "peak_on": peak_at.date(),
-    }
-    if "temp_c" in frame.columns:
-        temps = frame["temp_c"]
-        monthly = temps.groupby(temps.index.month).mean().reindex(range(1, 13))
-        facts["temp"] = {
-            "mean": float(temps.mean()),
-            "curve": monthly.tolist(),
-            "warmest_month": int(monthly.idxmax()),
-            "warmest": float(monthly.max()),
-            "coolest": float(monthly.min()),
-        }
-    return facts
-
-
-def location_map(height=260):
-    st.map(
-        pd.DataFrame({"lat": [LATITUDE], "lon": [LONGITUDE]}),
-        zoom=8,
-        size=600,
-        color="#fb8500",
-        height=height,
-    )
-
-
 if "mode" not in st.session_state:
     st.session_state["mode"] = None
 
@@ -1133,34 +1093,7 @@ if st.session_state["mode"] is None:
         f"<span>local time <b>{LOCAL_TZ}</b></span>"
         "</div></div>"
     )
-    facts = location_facts(dataset_path, dataset_path.stat().st_mtime, LOCAL_TZ)
-    map_col, facts_col = st.columns([3, 2], gap="medium")
-    with map_col:
-        location_map()
-    with facts_col:
-        with st.container(border=True, height=260):
-            top = st.columns(2)
-            top[0].metric(
-                "Typical wind", f"{facts['mean']:.1f} kt",
-                delta=beaufort(facts["mean"]), delta_arrow="off",
-                chart_data=facts["month_curve"], chart_type="area",
-                help="Average across every reading on record",
-            )
-            top[1].metric("Wind usually from", facts["prevailing"],
-                          icon=":material/explore:")
-            if "temp" in facts:
-                temp = facts["temp"]
-                st.metric(
-                    "Typical temperature", f"{temp['mean']:.0f}°C",
-                    delta=f"{temp['coolest']:.0f}–{temp['warmest']:.0f}°C by month",
-                    delta_arrow="off", chart_data=temp["curve"], chart_type="area",
-                )
-            st.caption(
-                f"Windiest in **{calendar.month_name[facts['windiest_month']]}**, "
-                f"calmest in **{calendar.month_name[facts['calmest_month']]}**. "
-                f"Strongest on record {facts['peak']:.0f} kt on {facts['peak_on']}. "
-                f"{facts['readings']:,} hourly readings."
-            )
+    locator_map(LATITUDE, LONGITUDE, key="start_map", height=300)
 
     st.write("")
     st.session_state.setdefault("activity", "Any wind")
@@ -1183,37 +1116,34 @@ if st.session_state["mode"] is None:
     st.markdown("###### Step 3 · What do you want to see?")
     cards = [
         (
-            ":material/insights: :blue[Explore and compare]",
+            ":material/insights: Explore and compare",
             "Dig through the record yourself — windy days per month, sailing "
             "sessions by hour, month-against-month across the years, and where "
             "the wind blows from.",
             "Start exploring",
-            "secondary",
             "explore",
         ),
         (
-            ":material/star: :orange[Rate this spot]",
+            ":material/star: Rate this spot",
             "One verdict for the whole location, judged for what you sail: days "
             "in the groove, season length, steadiness — scored out of ten.",
             "Rate the location",
-            "primary",
             "rating",
         ),
         (
-            ":material/compare_arrows: :violet[Compare two spots]",
+            ":material/compare_arrows: Compare two spots",
             "Put this location head to head with another you have downloaded — "
             "scores, month by month, and where the wind comes from at each.",
             "Compare locations",
-            "secondary",
             "compare",
         ),
     ]
-    # Fixed height keeps both cards identical regardless of text length.
-    for column, (heading, blurb, action, kind, target) in zip(st.columns(3), cards):
+    # Fixed height and one button style keep all three cards identical.
+    for column, (heading, blurb, action, target) in zip(st.columns(3), cards):
         with column.container(border=True, height=260):
             st.markdown(f"### {heading}")
             st.write(blurb)
-            if st.button(action, width="stretch", type=kind):
+            if st.button(action, width="stretch", type="secondary"):
                 st.session_state["mode"] = target
                 st.session_state.pop("last_mode", None)
                 st.session_state["rating_fresh"] = target == "rating"
