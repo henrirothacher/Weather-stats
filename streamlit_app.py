@@ -16,7 +16,29 @@ import xarray as xr
 from streamlit_folium import st_folium
 from timezonefinder import TimezoneFinder
 
-st.set_page_config(page_title="Weather Data - ERA5", layout="wide")
+st.set_page_config(page_title="Wind Atlas - ERA5 Sailing Forecasts", layout="wide")
+
+st.html(
+    """
+    <style>
+    .app-masthead {
+        display: flex; align-items: baseline; gap: .65rem; flex-wrap: wrap;
+        padding: .5rem 0 .1rem;
+    }
+    .app-masthead .mark {
+        font-size: 1.6rem; font-weight: 800; letter-spacing: -.02em;
+        background: linear-gradient(90deg, #8ecae6, #ffb703 55%, #fb8500);
+        -webkit-background-clip: text; background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    .app-masthead .tag { font-size: .82rem; opacity: .55; }
+    </style>
+    <div class="app-masthead">
+        <span class="mark">🌬️ Wind Atlas</span>
+        <span class="tag">Eighty years of hourly wind, anywhere you sail</span>
+    </div>
+    """
+)
 
 MS_TO_KNOTS = 1.9438444924406046
 
