@@ -1045,39 +1045,6 @@ if "mode" not in st.session_state:
     st.session_state["mode"] = None
 
 
-# --- When you sail (shared by every view, so the rating cannot quietly
-#     score different hours than the ones you picked) ----------------------
-
-st.sidebar.header("Settings")
-
-unit = pick(
-    st.sidebar.segmented_control("Units", ["knots", "m/s"], default="knots", key="unit"), "knots"
-)
-factor = MS_TO_KNOTS if unit == "knots" else 1.0
-
-sessions = []
-with st.sidebar.expander("When you sail", expanded=False):
-    st.caption("Only count the hours you are actually on the water.")
-    split_sessions = st.checkbox("Filter by sailing session", value=True)
-    if split_sessions:
-        morning = st.slider("Session 1", 0, 23, (8, 11), format="%d:00")
-        sessions.append((f"Session 1 · {morning[0]:02d}:00–{morning[1]:02d}:00", morning))
-        if st.checkbox("Second session", value=True):
-            afternoon = st.slider("Session 2", 0, 23, (14, 17), format="%d:00")
-            sessions.append(
-                (f"Session 2 · {afternoon[0]:02d}:00–{afternoon[1]:02d}:00", afternoon)
-            )
-    else:
-        sessions.append(("All hours", None))
-st.sidebar.caption(" · ".join(label.split("· ")[-1] for label, _ in sessions))
-
-SESSION_WINDOWS = tuple(hours for _, hours in sessions)
-SESSION_TEXT = " and ".join(
-    "all day" if hours is None else f"{hours[0]:02d}:00–{hours[1]:02d}:59"
-    for hours in SESSION_WINDOWS
-)
-
-
 # --- Start screen ---------------------------------------------------------
 
 if st.session_state["mode"] is None:
@@ -1151,6 +1118,51 @@ if st.session_state["mode"] is None:
     st.stop()
 
 
+# --- Settings ------------------------------------------------------------
+# Below the start screen on purpose: the sidebar only appears once you are
+# inside a view, and then it carries everything that changes what you see.
+# Shared by every view, so the rating cannot quietly score different hours
+# than the ones you picked.
+
+st.sidebar.header("Settings")
+
+activity = st.sidebar.selectbox(
+    "What you are sailing", list(ACTIVITIES),
+    index=list(ACTIVITIES).index(st.session_state["activity"]),
+    key="activity_side",
+)
+st.session_state["activity"] = activity
+groove_low, groove_high = ACTIVITIES[activity]["groove"]
+st.sidebar.caption(f"Sailable wind {groove_low}–{groove_high} kt")
+
+unit = pick(
+    st.sidebar.segmented_control("Units", ["knots", "m/s"], default="knots", key="unit"), "knots"
+)
+factor = MS_TO_KNOTS if unit == "knots" else 1.0
+
+sessions = []
+with st.sidebar.expander("When you sail", expanded=False):
+    st.caption("Only count the hours you are actually on the water.")
+    split_sessions = st.checkbox("Filter by sailing session", value=True)
+    if split_sessions:
+        morning = st.slider("Session 1", 0, 23, (8, 11), format="%d:00")
+        sessions.append((f"Session 1 · {morning[0]:02d}:00–{morning[1]:02d}:00", morning))
+        if st.checkbox("Second session", value=True):
+            afternoon = st.slider("Session 2", 0, 23, (14, 17), format="%d:00")
+            sessions.append(
+                (f"Session 2 · {afternoon[0]:02d}:00–{afternoon[1]:02d}:00", afternoon)
+            )
+    else:
+        sessions.append(("All hours", None))
+st.sidebar.caption(" · ".join(label.split("· ")[-1] for label, _ in sessions))
+
+SESSION_WINDOWS = tuple(hours for _, hours in sessions)
+SESSION_TEXT = " and ".join(
+    "all day" if hours is None else f"{hours[0]:02d}:00–{hours[1]:02d}:59"
+    for hours in SESSION_WINDOWS
+)
+
+
 # --- Compare two locations ------------------------------------------------
 
 if st.session_state["mode"] == "compare":
@@ -1172,7 +1184,7 @@ if st.session_state["mode"] == "compare":
         )
         st.stop()
 
-    choice = st.selectbox(
+    choice = st.sidebar.selectbox(
         "Compare against", list(others),
         format_func=lambda key: others[key]["name"],
     )
@@ -1383,16 +1395,14 @@ if st.session_state["mode"] == "rating":
     st.stop()
 
 
-# --- What period to show (main page, so it is hard to miss) ---------------
+# --- What period to show (sidebar, alongside the other controls) ----------
 
-view = pick(
-    st.segmented_control(
-        "What do you want to look at?",
-        ["Windy days per month", "Date range", "Month across years"],
-        default="Windy days per month",
-        key="view",
-    ),
-    "Windy days per month",
+st.sidebar.subheader("What to look at")
+
+view = st.sidebar.radio(
+    "View",
+    ["Windy days per month", "Date range", "Month across years"],
+    key="view",
 )
 month_view = view == "Month across years"
 windy_view = view == "Windy days per month"
@@ -1400,23 +1410,16 @@ windy_view = view == "Windy days per month"
 lookback_options = {"5 years": 5, "10 years": 10, "15 years": 15, "20 years": 20, "All": None}
 
 if windy_view:
-    lookback_label = pick(
-        st.segmented_control(
-            "Compare over", list(lookback_options), default="All", key="windy_lookback"
-        ),
-        "All",
+    lookback_label = st.sidebar.selectbox(
+        "Compare over", list(lookback_options),
+        index=list(lookback_options).index("All"), key="windy_lookback",
     )
     lookback = lookback_options[lookback_label]
-    with st.popover(":material/tune: How a day is counted"):
-        day_rule = pick(
-            st.segmented_control(
-                "A day counts when the wind",
-                ["averages the speed", "reaches the speed"],
-                default="averages the speed",
-                key="day_rule",
-            ),
-            "averages the speed",
-        )
+    day_rule = st.sidebar.radio(
+        "A day counts when the wind",
+        ["averages the speed", "reaches the speed"],
+        key="day_rule",
+    )
     how = "max" if day_rule == "reaches the speed" else "mean"
 
     first_year = data_start.year if lookback is None else data_end.year - lookback + 1
@@ -1424,49 +1427,39 @@ if windy_view:
     window = df[df.index.year >= first_year]
     period_label = f"all months, {first_year}–{data_end.year}"
 elif month_view:
-    left, right = st.columns([3, 2])
-    with left:
-        month = pick(
-            st.segmented_control(
-                "Month",
-                list(range(1, 13)),
-                default=data_end.month,
-                format_func=lambda m: calendar.month_abbr[m],
-                key="month",
-            ),
-            data_end.month,
-        )
-    with right:
-        lookback_label = pick(
-            st.segmented_control(
-                "Compare over", list(lookback_options), default="10 years", key="lookback"
-            ),
-            "10 years",
-        )
-        lookback = lookback_options[lookback_label]
+    month = st.sidebar.selectbox(
+        "Month", list(range(1, 13)),
+        index=data_end.month - 1,
+        format_func=lambda m: calendar.month_name[m],
+        key="month",
+    )
+    lookback_label = st.sidebar.selectbox(
+        "Compare over", list(lookback_options),
+        index=list(lookback_options).index("10 years"), key="lookback",
+    )
+    lookback = lookback_options[lookback_label]
 
     first_year = data_start.year if lookback is None else data_end.year - lookback + 1
     first_year = max(first_year, data_start.year)
     window = df[(df.index.month == month) & (df.index.year >= first_year)]
     period_label = f"{calendar.month_name[month]} {first_year}–{data_end.year}"
 else:
-    quick, picker = st.columns([2, 3])
-    with quick:
-        quick_ranges = {"1 month": 30, "1 year": 365, "10 years": 3650, "Everything": None}
-        chosen = st.segmented_control("Jump to", list(quick_ranges), default=None, key="quick")
-        if chosen is not None:
-            days = quick_ranges[chosen]
-            first = data_start if days is None else max(data_start, data_end - timedelta(days=days))
-            st.session_state["time_range"] = (first, data_end)
-    with picker:
-        if "time_range" not in st.session_state:
-            st.session_state["time_range"] = (
-                max(data_start, data_end - timedelta(days=365)),
-                data_end,
-            )
-        time_range = st.date_input(
-            "From / to", min_value=data_start, max_value=data_end, key="time_range"
+    quick_ranges = {"1 month": 30, "1 year": 365, "10 years": 3650, "Everything": None}
+    chosen = st.sidebar.segmented_control(
+        "Jump to", list(quick_ranges), default=None, key="quick"
+    )
+    if chosen is not None:
+        days = quick_ranges[chosen]
+        first = data_start if days is None else max(data_start, data_end - timedelta(days=days))
+        st.session_state["time_range"] = (first, data_end)
+    if "time_range" not in st.session_state:
+        st.session_state["time_range"] = (
+            max(data_start, data_end - timedelta(days=365)),
+            data_end,
         )
+    time_range = st.sidebar.date_input(
+        "From / to", min_value=data_start, max_value=data_end, key="time_range"
+    )
     if len(time_range) != 2:
         st.warning("Pick both a start and an end date.")
         st.stop()
@@ -1525,11 +1518,8 @@ if windy_view:
     # One set of hours drives the metrics, the month chart and the rose.
     hour_choices = {label: hours for label, hours in sessions}
     hour_choices["All day"] = None
-    picked_hours_label = pick(
-        st.segmented_control(
-            "Hours to count", list(hour_choices), default=list(hour_choices)[0], key="windy_hours"
-        ),
-        list(hour_choices)[0],
+    picked_hours_label = st.sidebar.selectbox(
+        "Hours to count", list(hour_choices), key="windy_hours"
     )
     picked_hours = hour_choices[picked_hours_label]
     summary_items = [(picked_hours_label, prepare(picked_hours))]
@@ -1688,14 +1678,10 @@ if windy_view:
         )
 elif month_view:
     st.subheader(f"{calendar.month_name[month]} compared across years")
-    style = pick(
-        st.segmented_control(
-            "Show as",
-            ["Year by year", "Spread", "Calendar", "Time of day"],
-            default="Year by year",
-            key="chart_style",
-        ),
-        "Year by year",
+    style = st.sidebar.radio(
+        "Show as",
+        ["Year by year", "Spread", "Calendar", "Time of day"],
+        key="chart_style",
     )
 
     years = sorted({y for _, s in active for y in set(s.index.year)})
