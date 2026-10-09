@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import xarray as xr
+from folium.plugins import MiniMap
 from streamlit_folium import st_folium
 from timezonefinder import TimezoneFinder
 
@@ -350,7 +351,21 @@ def rose_bands(direction, speed, thresholds, bins=72, sigma=3.0):
     return np.deg2rad(np.arange(bins) * (360 / bins)), bands
 
 
-MAP_TILES = "CartoDB dark_matter"
+# CARTO started stamping "API KEY REQUIRED" across its basemaps, so the dark
+# ground comes from Esri's canvas instead, which serves without a key. It ships
+# the place names as a separate transparent layer laid over the base.
+MAP_TILES = (
+    "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/"
+    "World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}"
+)
+MAP_LABELS = (
+    "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/"
+    "World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}"
+)
+MAP_ATTR = "Esri"
+# The canvas is drawn up to zoom 16; past that Leaflet stretches the last tiles
+# rather than showing nothing.
+MAP_NATIVE_ZOOM = 16
 MAP_CHROME_CSS = """
 <style>
 .spot-dot {
@@ -400,14 +415,34 @@ def dot_marker(latitude, longitude, tooltip, picked=False):
     )
 
 
+def base_map(**options):
+    """A dark map carrying the house styling, ready for markers."""
+    chart = folium.Map(tiles=None, **options)
+    for url, overlay in ((MAP_TILES, False), (MAP_LABELS, True)):
+        folium.TileLayer(
+            url, attr=MAP_ATTR, overlay=overlay, control=False,
+            max_zoom=18, max_native_zoom=MAP_NATIVE_ZOOM,
+        ).add_to(chart)
+    chart.get_root().header.add_child(folium.Element(MAP_CHROME_CSS))
+    return chart
+
+
 def locator_map(latitude, longitude, key, height=230):
     """The cell against the coastline, so you can see whether the water you
-    care about is actually water."""
-    local = folium.Map(
-        location=[latitude, longitude], zoom_start=8, tiles=MAP_TILES,
-        zoom_control=False, scrollWheelZoom=False, dragging=True,
+    care about is actually water.
+
+    An offshore cell can sit a thousand miles from the nearest land, where a
+    close view is an empty square of ocean — hence the zoom controls and the
+    world inset, which place the cell when the tiles alone cannot."""
+    local = base_map(
+        location=[latitude, longitude], zoom_start=7,
+        control_scale=True, dragging=True,
     )
-    local.get_root().header.add_child(folium.Element(MAP_CHROME_CSS))
+    MiniMap(
+        tile_layer=folium.TileLayer(MAP_TILES, attr=MAP_ATTR),
+        position="bottomleft", width=104, height=104,
+        zoom_level_offset=-6, toggle_display=True,
+    ).add_to(local)
     folium.Rectangle(
         bounds=[
             [latitude - GRID / 2, longitude - GRID / 2],
@@ -535,15 +570,13 @@ if st.session_state["spot"] is None:
     with chart:
         clicked = st.session_state.get("clicked")
         centre = clicked or (25.0, 5.0)
-        world = folium.Map(
+        world = base_map(
             location=list(centre),
             zoom_start=7 if clicked else 2,
-            tiles=MAP_TILES,
             control_scale=True,
             min_zoom=2,
             world_copy_jump=True,
         )
-        world.get_root().header.add_child(folium.Element(MAP_CHROME_CSS))
         # Everything already on disk, so the map doubles as your library.
         for entry in saved.values():
             dot_marker(entry["lat"], entry["lon"], entry["name"]).add_to(world)
