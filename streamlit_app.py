@@ -105,40 +105,35 @@ st.html(
     .rating-stars span:nth-child(5) { animation-delay: .36s; }
 
     /* Hero blocks on the entry screens. */
-    .hero { animation: riseIn .55s ease both; padding: .2rem 0 1.1rem; }
+    .hero { animation: riseIn .55s ease both; padding: .2rem 0 1.1rem; position: relative; }
     .hero-title {
         font-size: 2.9rem; font-weight: 700; line-height: 1.1; letter-spacing: -.025em;
         color: #e8eef5;
     }
     .hero-sub {
-        font-size: 1.02rem; opacity: .72; max-width: 62ch; margin-top: .5rem;
-        line-height: 1.5;
+        font-size: 1.02rem; opacity: .72; max-width: 52ch; margin-top: .6rem;
+        line-height: 1.55; animation: riseIn .6s ease .12s both;
     }
     .hero-eyebrow {
         text-transform: uppercase; letter-spacing: .16em; font-size: .72rem;
-        opacity: .55; font-weight: 600; margin-bottom: .3rem;
+        font-weight: 600; margin-bottom: .3rem; color: #fb8500; opacity: .9;
     }
     .stat-strip {
         display: flex; gap: 1.6rem; flex-wrap: wrap; opacity: .8;
-        font-size: .86rem; margin-top: .35rem;
+        font-size: .86rem; margin-top: .55rem;
     }
-    .stat-strip b { font-weight: 600; opacity: 1; }
+    .stat-strip b { font-weight: 600; opacity: 1; color: #8ecae6; }
 
     /* Wind drifting across the hero. */
     @keyframes drift {
         from { transform: translateX(-18%); }
         to   { transform: translateX(18%); }
     }
-    @keyframes gradientRoll {
-        0%   { background-position: 0% 50%; }
-        100% { background-position: 200% 50%; }
-    }
     @keyframes breathe {
         0%, 100% { opacity: .45; }
         50%      { opacity: .9; }
     }
 
-    .hero { animation: riseIn .55s ease both; padding: .2rem 0 1.1rem; position: relative; }
     .hero-streaks {
         position: absolute; inset: -20% -30%; z-index: 0; pointer-events: none;
         background: repeating-linear-gradient(
@@ -153,19 +148,6 @@ st.html(
         animation: drift 13s ease-in-out infinite alternate, breathe 7s ease-in-out infinite;
     }
     .hero > *:not(.hero-streaks) { position: relative; z-index: 1; }
-    .hero-sub {
-        font-size: 1.02rem; opacity: .72; max-width: 52ch; margin-top: .6rem;
-        line-height: 1.55; animation: riseIn .6s ease .12s both;
-    }
-    .hero-eyebrow {
-        text-transform: uppercase; letter-spacing: .16em; font-size: .72rem;
-        opacity: .55; font-weight: 600; margin-bottom: .3rem;
-    }
-    .stat-strip {
-        display: flex; gap: 1.6rem; flex-wrap: wrap; opacity: .8;
-        font-size: .86rem; margin-top: .55rem;
-    }
-    .stat-strip b { font-weight: 600; opacity: 1; }
 
     /* The map sits in its own rounded panel rather than running edge to edge. */
     iframe[title="streamlit_folium.st_folium"] {
@@ -185,9 +167,7 @@ st.html(
         animation: wordIn .55s cubic-bezier(.2,.7,.3,1) both;
     }
 
-    /* Colour accents on the dark ground. */
-    .hero-eyebrow { color: #fb8500; opacity: .9; }
-    .stat-strip b { color: #8ecae6; }
+    /* Colour accent on the dark ground. */
     .accent-rule {
         height: 3px; border: 0; border-radius: 3px; margin: .2rem 0 1.1rem;
         background: linear-gradient(90deg, #fb8500, #ffb703 32%, #8ecae6 68%, transparent);
@@ -669,10 +649,6 @@ def best_window(series_knots, length=3):
     start = (end - length + 1) % 24
     return start, end, float(rolled.max()) if not rolled.empty else float("nan")
 
-
-
-
-# --- Download -------------------------------------------------------------
 
 # --- Stage 1: pick a spot on the map --------------------------------------
 
