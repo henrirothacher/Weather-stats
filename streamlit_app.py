@@ -22,6 +22,9 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# Goes up by 0.1 with every commit pushed to GitHub (2.9 -> 3.0).
+APP_VERSION = "2.1"
+
 st.html(
     """
     <style>
@@ -36,12 +39,19 @@ st.html(
         -webkit-text-fill-color: transparent;
     }
     .app-masthead .tag { font-size: .82rem; opacity: .55; }
+    /* Pinned to the window, so it stays put on every screen and scroll. */
+    .app-version {
+        position: fixed; right: .9rem; bottom: .7rem; z-index: 999;
+        font-size: .72rem; font-weight: 600; letter-spacing: .04em;
+        color: #8b98a5; pointer-events: none;
+    }
     </style>
     <div class="app-masthead">
         <span class="mark">🌬️ Wind Atlas</span>
         <span class="tag">Eighty years of hourly wind, anywhere you sail</span>
     </div>
     """
+    f'<div class="app-version">v{APP_VERSION}</div>'
 )
 
 # --- House styles: motion, heroes, cards --------------------------------
