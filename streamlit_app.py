@@ -23,7 +23,7 @@ st.set_page_config(
 )
 
 # Goes up by 0.1 with every commit pushed to GitHub (2.9 -> 3.0).
-APP_VERSION = "2.1"
+APP_VERSION = "2.2"
 
 st.html(
     """
