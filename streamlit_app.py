@@ -41,6 +41,162 @@ st.html(
     """
 )
 
+# --- House styles: motion, heroes, cards --------------------------------
+# Up here so every screen gets them, the map screen included.
+
+st.html(
+    """
+    <style>
+    @keyframes riseIn {
+        from { opacity: 0; transform: translateY(12px); }
+        to   { opacity: 1; transform: none; }
+    }
+    @keyframes sweepIn {
+        from { opacity: 0; transform: scale(.96); }
+        to   { opacity: 1; transform: none; }
+    }
+    @keyframes popIn {
+        0%   { opacity: 0; transform: scale(.4) rotate(-18deg); }
+        70%  { opacity: 1; transform: scale(1.15) rotate(4deg); }
+        100% { opacity: 1; transform: scale(1) rotate(0); }
+    }
+    @keyframes shimmer {
+        0%   { background-position: -220% 0; }
+        100% { background-position: 220% 0; }
+    }
+
+    /* Metrics and charts arrive rather than snapping in. */
+    [data-testid="stMetric"] { animation: riseIn .5s ease both; }
+    [data-testid="stMetric"]:nth-of-type(2) { animation-delay: .07s; }
+    [data-testid="stMetric"]:nth-of-type(3) { animation-delay: .14s; }
+    [data-testid="stMetric"]:nth-of-type(4) { animation-delay: .21s; }
+    [data-testid="stVegaLiteChart"],
+    [data-testid="stImage"],
+    [data-testid="stDeckGlJsonChart"] { animation: sweepIn .55s ease both; }
+
+    /* Bordered cards lift slightly under the pointer. */
+    [data-testid="stVerticalBlockBorderWrapper"] {
+        transition: transform .18s ease, box-shadow .18s ease;
+    }
+    [data-testid="stVerticalBlockBorderWrapper"]:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 10px 26px rgba(0, 0, 0, .18);
+    }
+
+    /* Progress meters glide to their value instead of jumping. */
+    [data-testid="stProgress"] div[role="progressbar"] > div {
+        transition: width .45s cubic-bezier(.22, .68, .36, 1);
+    }
+
+    .rating-hero { animation: riseIn .6s ease both; text-align: center; padding: .4rem 0 1rem; }
+    .rating-score {
+        font-size: 4.2rem; font-weight: 700; line-height: 1;
+        background: linear-gradient(100deg, currentColor 38%, #fb8500 50%, currentColor 62%);
+        background-size: 220% 100%;
+        -webkit-background-clip: text; background-clip: text;
+        -webkit-text-fill-color: transparent;
+        animation: shimmer 2.6s ease-in-out .5s 2;
+    }
+    .rating-stars { font-size: 1.6rem; letter-spacing: .18rem; }
+    .rating-stars span { display: inline-block; animation: popIn .45s ease both; }
+    .rating-stars span:nth-child(2) { animation-delay: .09s; }
+    .rating-stars span:nth-child(3) { animation-delay: .18s; }
+    .rating-stars span:nth-child(4) { animation-delay: .27s; }
+    .rating-stars span:nth-child(5) { animation-delay: .36s; }
+
+    /* Hero blocks on the entry screens. */
+    .hero { animation: riseIn .55s ease both; padding: .2rem 0 1.1rem; }
+    .hero-title {
+        font-size: 2.9rem; font-weight: 700; line-height: 1.1; letter-spacing: -.025em;
+        color: #e8eef5;
+    }
+    .hero-sub {
+        font-size: 1.02rem; opacity: .72; max-width: 62ch; margin-top: .5rem;
+        line-height: 1.5;
+    }
+    .hero-eyebrow {
+        text-transform: uppercase; letter-spacing: .16em; font-size: .72rem;
+        opacity: .55; font-weight: 600; margin-bottom: .3rem;
+    }
+    .stat-strip {
+        display: flex; gap: 1.6rem; flex-wrap: wrap; opacity: .8;
+        font-size: .86rem; margin-top: .35rem;
+    }
+    .stat-strip b { font-weight: 600; opacity: 1; }
+
+    /* Wind drifting across the hero. */
+    @keyframes drift {
+        from { transform: translateX(-18%); }
+        to   { transform: translateX(18%); }
+    }
+    @keyframes gradientRoll {
+        0%   { background-position: 0% 50%; }
+        100% { background-position: 200% 50%; }
+    }
+    @keyframes breathe {
+        0%, 100% { opacity: .45; }
+        50%      { opacity: .9; }
+    }
+
+    .hero { animation: riseIn .55s ease both; padding: .2rem 0 1.1rem; position: relative; }
+    .hero-streaks {
+        position: absolute; inset: -20% -30%; z-index: 0; pointer-events: none;
+        background: repeating-linear-gradient(
+            74deg, transparent 0 22px,
+            rgba(142, 202, 230, .16) 22px 23px,
+            transparent 23px 60px,
+            rgba(251, 133, 0, .13) 60px 61px,
+            transparent 61px 104px
+        );
+        -webkit-mask-image: radial-gradient(70% 120% at 20% 40%, #000 0%, transparent 72%);
+        mask-image: radial-gradient(70% 120% at 20% 40%, #000 0%, transparent 72%);
+        animation: drift 13s ease-in-out infinite alternate, breathe 7s ease-in-out infinite;
+    }
+    .hero > *:not(.hero-streaks) { position: relative; z-index: 1; }
+    .hero-sub {
+        font-size: 1.02rem; opacity: .72; max-width: 52ch; margin-top: .6rem;
+        line-height: 1.55; animation: riseIn .6s ease .12s both;
+    }
+    .hero-eyebrow {
+        text-transform: uppercase; letter-spacing: .16em; font-size: .72rem;
+        opacity: .55; font-weight: 600; margin-bottom: .3rem;
+    }
+    .stat-strip {
+        display: flex; gap: 1.6rem; flex-wrap: wrap; opacity: .8;
+        font-size: .86rem; margin-top: .55rem;
+    }
+    .stat-strip b { font-weight: 600; opacity: 1; }
+
+    /* The map sits in its own rounded panel rather than running edge to edge. */
+    iframe[title="streamlit_folium.st_folium"] {
+        border-radius: 16px;
+        box-shadow: 0 14px 40px rgba(0, 0, 0, .22);
+        animation: sweepIn .7s ease .18s both;
+    }
+
+    /* Words rise in one after another when a view switches. */
+    @keyframes wordIn {
+        from { opacity: 0; transform: translateY(14px); filter: blur(4px); }
+        to   { opacity: 1; transform: none; filter: none; }
+    }
+    .reveal span {
+        display: inline-block;
+        opacity: 0;
+        animation: wordIn .55s cubic-bezier(.2,.7,.3,1) both;
+    }
+
+    /* Colour accents on the dark ground. */
+    .hero-eyebrow { color: #fb8500; opacity: .9; }
+    .stat-strip b { color: #8ecae6; }
+    .accent-rule {
+        height: 3px; border: 0; border-radius: 3px; margin: .2rem 0 1.1rem;
+        background: linear-gradient(90deg, #fb8500, #ffb703 32%, #8ecae6 68%, transparent);
+        animation: sweepIn .7s ease both;
+    }
+    </style>
+    """
+)
+
 MS_TO_KNOTS = 1.9438444924406046
 
 # ERA5 is published on a 0.25 degree grid, so any click resolves to a cell.
@@ -739,162 +895,6 @@ if not dataset_path.exists():
 df = load_wind(dataset_path, dataset_path.stat().st_mtime, LOCAL_TZ)
 data_start = df.index.min().date()
 data_end = df.index.max().date()
-
-
-# --- Gentle motion, so panels arrive instead of snapping in ---------------
-
-st.html(
-    """
-    <style>
-    @keyframes riseIn {
-        from { opacity: 0; transform: translateY(12px); }
-        to   { opacity: 1; transform: none; }
-    }
-    @keyframes sweepIn {
-        from { opacity: 0; transform: scale(.96); }
-        to   { opacity: 1; transform: none; }
-    }
-    @keyframes popIn {
-        0%   { opacity: 0; transform: scale(.4) rotate(-18deg); }
-        70%  { opacity: 1; transform: scale(1.15) rotate(4deg); }
-        100% { opacity: 1; transform: scale(1) rotate(0); }
-    }
-    @keyframes shimmer {
-        0%   { background-position: -220% 0; }
-        100% { background-position: 220% 0; }
-    }
-
-    /* Metrics and charts arrive rather than snapping in. */
-    [data-testid="stMetric"] { animation: riseIn .5s ease both; }
-    [data-testid="stMetric"]:nth-of-type(2) { animation-delay: .07s; }
-    [data-testid="stMetric"]:nth-of-type(3) { animation-delay: .14s; }
-    [data-testid="stMetric"]:nth-of-type(4) { animation-delay: .21s; }
-    [data-testid="stVegaLiteChart"],
-    [data-testid="stImage"],
-    [data-testid="stDeckGlJsonChart"] { animation: sweepIn .55s ease both; }
-
-    /* Bordered cards lift slightly under the pointer. */
-    [data-testid="stVerticalBlockBorderWrapper"] {
-        transition: transform .18s ease, box-shadow .18s ease;
-    }
-    [data-testid="stVerticalBlockBorderWrapper"]:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 10px 26px rgba(0, 0, 0, .18);
-    }
-
-    /* Progress meters glide to their value instead of jumping. */
-    [data-testid="stProgress"] div[role="progressbar"] > div {
-        transition: width .45s cubic-bezier(.22, .68, .36, 1);
-    }
-
-    .rating-hero { animation: riseIn .6s ease both; text-align: center; padding: .4rem 0 1rem; }
-    .rating-score {
-        font-size: 4.2rem; font-weight: 700; line-height: 1;
-        background: linear-gradient(100deg, currentColor 38%, #fb8500 50%, currentColor 62%);
-        background-size: 220% 100%;
-        -webkit-background-clip: text; background-clip: text;
-        -webkit-text-fill-color: transparent;
-        animation: shimmer 2.6s ease-in-out .5s 2;
-    }
-    .rating-stars { font-size: 1.6rem; letter-spacing: .18rem; }
-    .rating-stars span { display: inline-block; animation: popIn .45s ease both; }
-    .rating-stars span:nth-child(2) { animation-delay: .09s; }
-    .rating-stars span:nth-child(3) { animation-delay: .18s; }
-    .rating-stars span:nth-child(4) { animation-delay: .27s; }
-    .rating-stars span:nth-child(5) { animation-delay: .36s; }
-
-    /* Hero blocks on the entry screens. */
-    .hero { animation: riseIn .55s ease both; padding: .2rem 0 1.1rem; }
-    .hero-title {
-        font-size: 2.9rem; font-weight: 700; line-height: 1.1; letter-spacing: -.025em;
-        color: #e8eef5;
-    }
-    .hero-sub {
-        font-size: 1.02rem; opacity: .72; max-width: 62ch; margin-top: .5rem;
-        line-height: 1.5;
-    }
-    .hero-eyebrow {
-        text-transform: uppercase; letter-spacing: .16em; font-size: .72rem;
-        opacity: .55; font-weight: 600; margin-bottom: .3rem;
-    }
-    .stat-strip {
-        display: flex; gap: 1.6rem; flex-wrap: wrap; opacity: .8;
-        font-size: .86rem; margin-top: .35rem;
-    }
-    .stat-strip b { font-weight: 600; opacity: 1; }
-
-    /* Wind drifting across the hero. */
-    @keyframes drift {
-        from { transform: translateX(-18%); }
-        to   { transform: translateX(18%); }
-    }
-    @keyframes gradientRoll {
-        0%   { background-position: 0% 50%; }
-        100% { background-position: 200% 50%; }
-    }
-    @keyframes breathe {
-        0%, 100% { opacity: .45; }
-        50%      { opacity: .9; }
-    }
-
-    .hero { animation: riseIn .55s ease both; padding: .2rem 0 1.1rem; position: relative; }
-    .hero-streaks {
-        position: absolute; inset: -20% -30%; z-index: 0; pointer-events: none;
-        background: repeating-linear-gradient(
-            74deg, transparent 0 22px,
-            rgba(142, 202, 230, .16) 22px 23px,
-            transparent 23px 60px,
-            rgba(251, 133, 0, .13) 60px 61px,
-            transparent 61px 104px
-        );
-        -webkit-mask-image: radial-gradient(70% 120% at 20% 40%, #000 0%, transparent 72%);
-        mask-image: radial-gradient(70% 120% at 20% 40%, #000 0%, transparent 72%);
-        animation: drift 13s ease-in-out infinite alternate, breathe 7s ease-in-out infinite;
-    }
-    .hero > *:not(.hero-streaks) { position: relative; z-index: 1; }
-    .hero-sub {
-        font-size: 1.02rem; opacity: .72; max-width: 52ch; margin-top: .6rem;
-        line-height: 1.55; animation: riseIn .6s ease .12s both;
-    }
-    .hero-eyebrow {
-        text-transform: uppercase; letter-spacing: .16em; font-size: .72rem;
-        opacity: .55; font-weight: 600; margin-bottom: .3rem;
-    }
-    .stat-strip {
-        display: flex; gap: 1.6rem; flex-wrap: wrap; opacity: .8;
-        font-size: .86rem; margin-top: .55rem;
-    }
-    .stat-strip b { font-weight: 600; opacity: 1; }
-
-    /* The map sits in its own rounded panel rather than running edge to edge. */
-    iframe[title="streamlit_folium.st_folium"] {
-        border-radius: 16px;
-        box-shadow: 0 14px 40px rgba(0, 0, 0, .22);
-        animation: sweepIn .7s ease .18s both;
-    }
-
-    /* Words rise in one after another when a view switches. */
-    @keyframes wordIn {
-        from { opacity: 0; transform: translateY(14px); filter: blur(4px); }
-        to   { opacity: 1; transform: none; filter: none; }
-    }
-    .reveal span {
-        display: inline-block;
-        opacity: 0;
-        animation: wordIn .55s cubic-bezier(.2,.7,.3,1) both;
-    }
-
-    /* Colour accents on the dark ground. */
-    .hero-eyebrow { color: #fb8500; opacity: .9; }
-    .stat-strip b { color: #8ecae6; }
-    .accent-rule {
-        height: 3px; border: 0; border-radius: 3px; margin: .2rem 0 1.1rem;
-        background: linear-gradient(90deg, #fb8500, #ffb703 32%, #8ecae6 68%, transparent);
-        animation: sweepIn .7s ease both;
-    }
-    </style>
-    """
-)
 
 
 RATING_YEARS = 20
