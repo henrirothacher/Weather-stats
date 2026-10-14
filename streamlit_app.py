@@ -162,9 +162,101 @@ st.html(
     }
     .hero > *:not(.hero-streaks) { position: relative; z-index: 1; }
 
+    /* Landing: the first screen anyone sees. */
+    .landing {
+        position: relative; overflow: hidden; padding: 2.4rem 0 1.6rem;
+        animation: riseIn .55s ease both;
+    }
+    .landing::after {
+        content: ""; position: absolute; z-index: 0; pointer-events: none;
+        right: -12%; top: -40%; width: 60%; height: 140%;
+        background: radial-gradient(closest-side, rgba(251, 133, 0, .16), transparent);
+    }
+    .landing > *:not(.hero-streaks) { position: relative; z-index: 1; }
+    .landing-grid {
+        display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+        gap: 2.5rem; align-items: end;
+    }
+    @media (max-width: 900px) { .landing-grid { grid-template-columns: 1fr; gap: 1.4rem; } }
+    .landing-eyebrow {
+        display: flex; align-items: center; gap: .6rem;
+        font-size: .72rem; font-weight: 700; letter-spacing: .18em;
+        text-transform: uppercase; color: #fb8500;
+    }
+    .landing-eyebrow::before {
+        content: ""; width: 32px; height: 2px;
+        background: linear-gradient(90deg, #fb8500, #ffb703);
+    }
+    .landing-title {
+        font-size: clamp(2.4rem, 5.2vw, 4.4rem); font-weight: 800; line-height: 1.02;
+        letter-spacing: -.04em; color: #e8eef5; margin-top: .8rem; max-width: 15ch;
+    }
+    .landing-title .wind {
+        background: linear-gradient(90deg, #8ecae6, #ffb703 55%, #fb8500);
+        -webkit-background-clip: text; background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    .landing-sub {
+        font-size: 1.08rem; line-height: 1.6; color: #a9b6c3; max-width: 56ch;
+        margin-top: 1.1rem; animation: riseIn .6s ease .12s both;
+    }
+    .landing-steps {
+        display: flex; flex-wrap: wrap; gap: .5rem 1.4rem; margin-top: 1.4rem;
+        font-size: .9rem; color: #c5d0da; animation: riseIn .6s ease .2s both;
+    }
+    .landing-steps span { display: inline-flex; align-items: center; gap: .55rem; }
+    .landing-steps b {
+        display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem;
+        border: 1px solid #26333f; border-radius: 4px; background: #141c25;
+        color: #ffb703; font-size: .78rem;
+    }
+    .landing-facts {
+        display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem;
+        animation: riseIn .6s ease .28s both;
+    }
+    .landing-facts div {
+        border: 1px solid #26333f; border-left: 3px solid #fb8500; border-radius: 4px;
+        background: rgba(20, 28, 37, .72); padding: .75rem .9rem;
+    }
+    .landing-facts div:nth-child(2n) { border-left-color: #8ecae6; }
+    .landing-facts b {
+        display: block; font-size: 1.45rem; font-weight: 800; letter-spacing: -.02em;
+        color: #e8eef5;
+    }
+    .landing-facts span {
+        font-size: .7rem; letter-spacing: .1em; text-transform: uppercase; color: #8b98a5;
+    }
+    .section-label {
+        display: flex; align-items: baseline; gap: .7rem; margin: 0 0 .2rem;
+        font-size: 1.15rem; font-weight: 700; color: #e8eef5;
+    }
+    .section-label small { font-size: .82rem; font-weight: 500; color: #8b98a5; }
+
+    /* The spot you just clicked: the one thing to act on next. */
+    .st-key-picked_panel {
+        border: 1px solid rgba(251, 133, 0, .65) !important; border-radius: 6px;
+        background: linear-gradient(180deg, rgba(251, 133, 0, .08), transparent 70%);
+        padding: 1rem 1.1rem;
+    }
+    /* Saved spots as list rows: hover finds them on the map, Open reopens. */
+    [class*="st-key-spot_card_"] {
+        border: 1px solid #26333f; border-left: 3px solid #8ecae6; border-radius: 4px;
+        background: #111922; padding: .55rem .7rem .55rem .85rem;
+        transition: background .15s ease, border-color .15s ease;
+    }
+    [class*="st-key-spot_card_"]:hover {
+        border-left-color: #fb8500; border-color: rgba(251, 133, 0, .45);
+        background: #16202b;
+    }
+    [class*="st-key-spot_card_"] p { margin-bottom: 0; line-height: 1.45; }
+    /* Text and Open button share one line; the text wraps instead. */
+    [class*="st-key-spot_card_"] { flex-wrap: nowrap !important; }
+    [class*="st-key-spot_card_"] > div:first-child { flex: 1 1 auto !important; min-width: 0 !important; }
+    [class*="st-key-spot_card_"] > div:last-child { flex: 0 0 auto !important; }
+
     /* The map sits in its own rounded panel rather than running edge to edge. */
     iframe[title="streamlit_folium.st_folium"] {
-        border-radius: 16px;
+        border-radius: 6px;
         box-shadow: 0 14px 40px rgba(0, 0, 0, .22);
         animation: sweepIn .7s ease .18s both;
     }
@@ -344,6 +436,22 @@ def downloaded_locations():
             }
         found[key] = {**entry, "path": path}
     return found
+
+
+def coords_label(latitude, longitude):
+    """36.75°N · 8.25°W — how a sailor reads a position."""
+    return (
+        f"{abs(latitude):.2f}°{'N' if latitude >= 0 else 'S'} · "
+        f"{abs(longitude):.2f}°{'E' if longitude >= 0 else 'W'}"
+    )
+
+
+@st.cache_data(show_spinner=False)
+def record_span(path, mtime):
+    """First and last year in a downloaded file, read from its time axis alone."""
+    with xr.open_dataset(path) as ds:
+        times = pd.DatetimeIndex(ds["valid_time"].values)
+    return int(times.min().year), int(times.max().year)
 
 
 def unpack_download(download_path, target):
@@ -572,7 +680,84 @@ MAP_CHROME_CSS = """
     color: #71808f !important;
 }
 .leaflet-control-attribution img { display: none !important; }
+.spot-hover-tip {
+    background: #0a0e13; color: #e8eef5; border: 1px solid #fb8500;
+    border-radius: 4px; font: 700 12px/1.2 Inter, system-ui, sans-serif;
+    padding: 4px 8px; box-shadow: 0 4px 14px rgba(0, 0, 0, .5);
+}
+.spot-hover-tip::before { border-top-color: #fb8500 !important; }
+.map-hint {
+    position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+    z-index: 1000; pointer-events: none; white-space: nowrap;
+    background: rgba(10, 14, 19, .88); color: #e8eef5;
+    border: 1px solid rgba(251, 133, 0, .7); border-radius: 4px;
+    padding: 7px 14px; font: 600 12px/1.2 Inter, system-ui, sans-serif;
+    letter-spacing: .02em; box-shadow: 0 6px 18px rgba(0, 0, 0, .45);
+}
 </style>
+"""
+
+
+LANDING_MAP_HEIGHT = 440
+
+# Hovering a saved spot drops a labelled, pulsing marker on the landing map
+# and flies there when the spot is off-screen. Hover never reaches Python, so
+# this runs in the page and reaches into the map's frame, which streamlit_folium
+# serves from the same origin with the Leaflet map at window.map. SPOTS_JSON is
+# filled in per run; the listeners are installed only once.
+# The script must never contain "<" followed by a letter, "/" or "!": st.html
+# sanitizes with DOMPurify, which silently deletes such a script whole. Hence
+# the marker is built as an element rather than from an HTML string.
+SPOT_HOVER_SCRIPT = """
+<script>
+(() => {
+  window.__windSpots = SPOTS_JSON;
+  if (window.__windSpotHover) return;
+  window.__windSpotHover = true;
+
+  let activeCard = null;
+  let marker = null;
+  const clear = () => { if (marker) { marker.remove(); marker = null; } };
+  const cardOf = (el) => el && el.closest && el.closest('[class*="st-key-spot_card_"]');
+
+  document.addEventListener("mouseover", (event) => {
+    const card = cardOf(event.target);
+    if (!card || card === activeCard) return;
+    activeCard = card;
+    const match = card.className.match(/st-key-spot_card_(\\d+)/);
+    const spot = match && window.__windSpots[Number(match[1])];
+    const frame = document.querySelector('iframe[title="streamlit_folium.st_folium"]');
+    const view = frame && frame.contentWindow;
+    if (!spot || !view || !view.map || !view.L) return;
+
+    clear();
+    const label = view.document.createElement("span");
+    label.textContent = spot.name;
+    const dot = view.document.createElement("div");
+    dot.className = "spot-dot picked";
+    marker = view.L.marker([spot.lat, spot.lon], {
+      icon: view.L.divIcon({
+        className: "", html: dot, iconSize: [13, 13], iconAnchor: [6, 6],
+      }),
+      interactive: false, zIndexOffset: 1000,
+    })
+      .bindTooltip(label, {
+        permanent: true, direction: "top", offset: [0, -10], className: "spot-hover-tip",
+      })
+      .addTo(view.map);
+    if (!view.map.getBounds().pad(-0.1).contains([spot.lat, spot.lon])) {
+      view.map.flyTo([spot.lat, spot.lon], Math.max(view.map.getZoom(), 5), { duration: 0.8 });
+    }
+  });
+
+  document.addEventListener("mouseout", (event) => {
+    if (!activeCard || !activeCard.contains(event.target)) return;
+    if (event.relatedTarget && activeCard.contains(event.relatedTarget)) return;
+    activeCard = null;
+    clear();
+  });
+})();
+</script>
 """
 
 
@@ -700,54 +885,60 @@ def enter_spot(latitude, longitude, zone, name):
 if st.session_state["spot"] is None:
     saved = downloaded_locations()
 
-    side, chart = st.columns([2, 3], gap="large")
+    st.html(
+        '<div class="landing">'
+        '<div class="hero-streaks"></div>'
+        '<div class="landing-grid"><div>'
+        '<div class="landing-eyebrow">Wind history for sailors</div>'
+        '<div class="landing-title">Find where the <span class="wind">wind</span> '
+        "really blows</div>"
+        '<div class="landing-sub">Click any stretch of water and pull every hour of '
+        "wind since 1940 for that spot. See how often it is sailable for what you "
+        "ride, in which months, at what time of day — and how it stacks up against "
+        "your other spots.</div>"
+        '<div class="landing-steps">'
+        "<span><b>1</b>Pick a spot</span>"
+        "<span><b>2</b>Choose your sport</span>"
+        "<span><b>3</b>Rate, explore or compare</span>"
+        "</div></div>"
+        '<div class="landing-facts">'
+        "<div><b>1940</b><span>first year on record</span></div>"
+        "<div><b>Hourly</b><span>every day since</span></div>"
+        "<div><b>25 km</b><span>per grid cell</span></div>"
+        f"<div><b>{len(saved)}</b><span>spots downloaded</span></div>"
+        "</div></div></div>"
+    )
 
-    with side:
-        st.html(
-            '<div class="hero">'
-            '<div class="hero-streaks"></div>'
-            '<div class="hero-eyebrow">Step 1 · Wind atlas</div>'
-            '<div class="hero-title reveal">'
-            + reveal("Pick a spot anywhere on earth")
-            + "</div>"
-            '<div class="hero-sub">Click the map and eighty years of hourly wind '
-            f'comes back for that {GRID}° cell — about 25 km across. '
-            f'<b>{len(saved)}</b> already downloaded.</div>'
-            "</div>"
-        )
+    preset = pick(
+        st.segmented_control(
+            "Jump to a known spot", list(PRESETS), default=None, key="preset",
+        ),
+        None,
+    )
+    if preset and st.session_state.get("preset_applied") != preset:
+        st.session_state["preset_applied"] = preset
+        st.session_state["clicked"] = PRESETS[preset]
+        st.session_state["recentre"] = PRESETS[preset]
+        st.rerun()
 
-        preset = pick(
-            st.segmented_control(
-                "Known spots", list(PRESETS), default=None, key="preset"
-            ),
-            None,
-        )
-        if preset and st.session_state.get("preset_applied") != preset:
-            st.session_state["preset_applied"] = preset
-            st.session_state["clicked"] = PRESETS[preset]
-            st.session_state["recentre"] = PRESETS[preset]
-            st.rerun()
+    clicked = st.session_state.get("clicked")
+    # Map and your spots side by side, so hovering a spot can show it on the map.
+    if saved:
+        map_col, list_col = st.columns([3, 2], gap="medium")
+    else:
+        map_col, list_col = st.container(), None
 
-        if saved:
-            key = st.selectbox(
-                "Or reopen one you have", list(saved),
-                format_func=lambda k: saved[k]["name"], key="saved_pick",
-            )
-            if st.button(":material/bolt: Open it", width="stretch"):
-                entry = saved[key]
-                enter_spot(entry["lat"], entry["lon"], entry["zone"], entry["name"])
-                st.rerun()
-
-    with chart:
-        clicked = st.session_state.get("clicked")
-        centre = clicked or (25.0, 5.0)
+    with map_col:
+        centre = clicked or (30.0, 5.0)
         world = base_map(
             location=list(centre),
-            zoom_start=7 if clicked else 2,
+            zoom_start=7 if clicked else 3,
             control_scale=True,
             min_zoom=2,
             world_copy_jump=True,
         )
+        hint = "Click again to move your pick" if clicked else "Click anywhere on the water"
+        world.get_root().html.add_child(folium.Element(f'<div class="map-hint">{hint}</div>'))
         # Everything already on disk, so the map doubles as your library.
         for entry in saved.values():
             dot_marker(entry["lat"], entry["lon"], entry["name"]).add_to(world)
@@ -767,55 +958,86 @@ if st.session_state["spot"] is None:
         # push a new centre explicitly or only the panel below would update.
         recentre = st.session_state.pop("recentre", None)
         result = st_folium(
-            world, height=430, use_container_width=True, key="picker",
+            world, height=LANDING_MAP_HEIGHT, use_container_width=True, key="picker",
             center=list(recentre) if recentre else None,
             zoom=8 if recentre else None,
             returned_objects=["last_clicked"],
         )
-        latest = None
-        if result and result.get("last_clicked"):
-            latest = (result["last_clicked"]["lat"], result["last_clicked"]["lng"])
-        # st_folium replays its stored click on every rerun, so compare against
-        # the click we last consumed — not against the current selection. Doing
-        # the latter let a stale click overwrite a preset chosen a moment before.
-        if latest is not None and latest != st.session_state.get("click_seen"):
-            st.session_state["click_seen"] = latest
-            st.session_state["clicked"] = latest
-            st.rerun()
+    latest = None
+    if result and result.get("last_clicked"):
+        latest = (result["last_clicked"]["lat"], result["last_clicked"]["lng"])
+    # st_folium replays its stored click on every rerun, so compare against
+    # the click we last consumed — not against the current selection. Doing
+    # the latter let a stale click overwrite a preset chosen a moment before.
+    if latest is not None and latest != st.session_state.get("click_seen"):
+        st.session_state["click_seen"] = latest
+        st.session_state["clicked"] = latest
+        st.rerun()
 
-    if not st.session_state.get("clicked"):
-        st.info("Click the map to choose a location, or open one you already have.")
-        st.stop()
-
-    raw_lat, raw_lon = st.session_state["clicked"]
-    latitude, longitude = snap_to_grid(raw_lat), snap_to_grid(raw_lon)
-    zone = timezone_at(latitude, longitude)
-    cached = dataset_for(latitude, longitude)
-
-    with st.container(border=True):
-        facts_row = st.columns([2, 2, 2, 3], vertical_alignment="center")
-        facts_row[0].metric(
-            "Grid cell", f"{latitude:+.2f}, {longitude:+.2f}",
-            icon=":material/location_on:",
-            help=f"You clicked {raw_lat:.3f}, {raw_lon:.3f}",
-        )
-        facts_row[1].metric("Time zone", zone.split("/")[-1].replace("_", " "),
-                            icon=":material/schedule:", help=zone)
-        facts_row[2].metric(
-            "Data", "on disk" if cached.exists() else "needs fetching",
-            icon=":material/database:",
-        )
-        with facts_row[3]:
-            known = load_registry().get(f"{latitude:+.2f}_{longitude:+.2f}", {})
-            name = st.text_input(
-                "Name this spot",
-                value=preset or known.get("name") or f"{latitude:+.2f}, {longitude:+.2f}",
-                key=f"name_{latitude:+.2f}_{longitude:+.2f}",
+    if list_col is not None:
+        with list_col:
+            st.html(
+                '<div class="section-label">Your spots'
+                f"<small>{len(saved)} downloaded · hover to find on the map</small></div>"
             )
-            if st.button(":material/arrow_forward: Use this location",
-                         type="primary", width="stretch"):
-                enter_spot(latitude, longitude, zone, name)
-                st.rerun()
+            # Same height as the map, scrolling once the list outgrows it.
+            with st.container(height=LANDING_MAP_HEIGHT - 58, gap="xsmall"):
+                for index, (key, entry) in enumerate(saved.items()):
+                    first, last = record_span(entry["path"], entry["path"].stat().st_mtime)
+                    zone_name = entry["zone"].split("/")[-1].replace("_", " ")
+                    # Keyed by position: the hover script below matches cards to
+                    # spots by this number.
+                    with st.container(key=f"spot_card_{index}", horizontal=True,
+                                      vertical_alignment="center"):
+                        st.markdown(
+                            f"**{entry['name']}**  \n"
+                            f":gray[{coords_label(entry['lat'], entry['lon'])} · "
+                            f"{first}–{last} · {zone_name}]"
+                        )
+                        if st.button("Open", key=f"open_{key}",
+                                     icon=":material/arrow_forward:", width="content"):
+                            enter_spot(entry["lat"], entry["lon"], entry["zone"], entry["name"])
+                            st.rerun()
+        spots = [
+            {"lat": entry["lat"], "lon": entry["lon"], "name": entry["name"]}
+            for entry in saved.values()
+        ]
+        # Every "<" escaped, so no spot name can trip the sanitizer (see above).
+        st.html(
+            SPOT_HOVER_SCRIPT.replace("SPOTS_JSON", json.dumps(spots).replace("<", "\\u003c")),
+            unsafe_allow_javascript=True,
+        )
+
+    if clicked:
+        raw_lat, raw_lon = clicked
+        latitude, longitude = snap_to_grid(raw_lat), snap_to_grid(raw_lon)
+        zone = timezone_at(latitude, longitude)
+        cached = dataset_for(latitude, longitude)
+
+        with st.container(key="picked_panel"):
+            facts_row = st.columns([2, 2, 2, 3], vertical_alignment="center")
+            facts_row[0].metric(
+                "Your pick", f"{latitude:+.2f}, {longitude:+.2f}",
+                icon=":material/location_on:",
+                help=f"You clicked {raw_lat:.3f}, {raw_lon:.3f}",
+            )
+            facts_row[1].metric("Time zone", zone.split("/")[-1].replace("_", " "),
+                                icon=":material/schedule:", help=zone)
+            facts_row[2].metric(
+                "Data", "on disk" if cached.exists() else "needs fetching",
+                icon=":material/database:",
+            )
+            with facts_row[3]:
+                known = load_registry().get(f"{latitude:+.2f}_{longitude:+.2f}", {})
+                name = st.text_input(
+                    "Name this spot",
+                    value=preset or known.get("name") or f"{latitude:+.2f}, {longitude:+.2f}",
+                    key=f"name_{latitude:+.2f}_{longitude:+.2f}",
+                )
+                if st.button(":material/arrow_forward: Use this location",
+                             type="primary", width="stretch"):
+                    enter_spot(latitude, longitude, zone, name)
+                    st.rerun()
     st.stop()
 
 
