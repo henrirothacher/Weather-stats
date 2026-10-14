@@ -17,7 +17,10 @@ from folium.plugins import MiniMap
 from streamlit_folium import st_folium
 from timezonefinder import TimezoneFinder
 
-st.set_page_config(page_title="Wind Atlas · ERA5 wind history", layout="wide")
+st.set_page_config(
+    page_title="Wind Atlas · ERA5 wind history", layout="wide",
+    initial_sidebar_state="expanded",
+)
 
 st.html(
     """
@@ -166,6 +169,27 @@ st.html(
         opacity: 0;
         animation: wordIn .55s cubic-bezier(.2,.7,.3,1) both;
     }
+
+    /* Every setting lives in the sidebar. Closed, its only way back is a
+       faded arrow in the corner, so turn that into a button nobody misses. */
+    [data-testid="stExpandSidebarButton"] {
+        display: inline-flex !important; align-items: center; gap: .35rem;
+        background: #fb8500 !important; border-radius: 999px !important;
+        padding: .3rem .9rem .3rem .55rem !important;
+        animation: settingsPulse 2.4s ease-out infinite;
+    }
+    [data-testid="stExpandSidebarButton"] span { color: #0b0f14 !important; }
+    [data-testid="stExpandSidebarButton"]::after {
+        content: "Settings"; color: #0b0f14; font-weight: 700; font-size: .9rem;
+    }
+    [data-testid="stExpandSidebarButton"]:hover { background: #ffb703 !important; }
+    @keyframes settingsPulse {
+        0%   { box-shadow: 0 0 0 0 rgba(251, 133, 0, .55); }
+        70%  { box-shadow: 0 0 0 12px rgba(251, 133, 0, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(251, 133, 0, 0); }
+    }
+    /* Open, an accent edge sets it apart from the page. */
+    [data-testid="stSidebar"] { border-right: 2px solid rgba(251, 133, 0, .35); }
 
     /* Colour accent on the dark ground. */
     .accent-rule {
@@ -1575,12 +1599,6 @@ if windy_view:
         f"{'reached' if how == 'max' else 'averaged above'} each speed, "
         f"counting {SESSION_TEXT} (local time)."
     )
-
-    with st.expander("Exact percentages"):
-        st.dataframe(
-            table.set_axis([calendar.month_name[m] for m in range(1, 13)]).round(0),
-            width="stretch",
-        )
 else:
     st.subheader(f"{calendar.month_name[month]} compared across years")
     style = st.sidebar.radio(
@@ -1673,7 +1691,21 @@ else:
     plt.tight_layout()
     st.pyplot(fig, width="stretch")
 
-    with st.expander("Year-by-year numbers"):
+
+# --- The numbers behind the charts (sidebar) ------------------------------
+# Kept out of the main page so the charts end cleanly.
+
+st.sidebar.subheader("Data")
+if windy_view:
+    with st.sidebar.expander("Exact percentages"):
+        st.dataframe(
+            table.set_axis([calendar.month_abbr[m] for m in range(1, 13)])
+            .set_axis([f"> {threshold:g}" for threshold in thresholds], axis=1)
+            .round(0),
+            width="stretch",
+        )
+else:
+    with st.sidebar.expander("Year-by-year numbers"):
         summaries = {}
         for label, series in active:
             grouped = series.groupby(series.index.year)["speed"]
@@ -1683,7 +1715,7 @@ else:
         if summaries:
             st.dataframe(pd.concat(summaries, axis=1).round(1), width="stretch")
 
-with st.expander("View data"):
+with st.sidebar.expander("View data"):
     tables = []
     for label, series in active:
         table = series.copy()
