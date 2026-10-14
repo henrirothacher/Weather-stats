@@ -2,7 +2,7 @@ import calendar
 import json
 import time
 import zipfile
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 import altair as alt
@@ -1428,10 +1428,9 @@ st.sidebar.subheader("What to look at")
 
 view = st.sidebar.radio(
     "View",
-    ["Windy days per month", "Date range", "Month across years"],
+    ["Windy days per month", "Month across years"],
     key="view",
 )
-month_view = view == "Month across years"
 windy_view = view == "Windy days per month"
 
 lookback_options = {"5 years": 5, "10 years": 10, "15 years": 15, "20 years": 20, "All": None}
@@ -1453,7 +1452,7 @@ if windy_view:
     first_year = max(first_year, data_start.year)
     window = df[df.index.year >= first_year]
     period_label = f"all months, {first_year}–{data_end.year}"
-elif month_view:
+else:
     month = st.sidebar.selectbox(
         "Month", list(range(1, 13)),
         index=data_end.month - 1,
@@ -1470,125 +1469,27 @@ elif month_view:
     first_year = max(first_year, data_start.year)
     window = df[(df.index.month == month) & (df.index.year >= first_year)]
     period_label = f"{calendar.month_name[month]} {first_year}–{data_end.year}"
-else:
-    quick_ranges = {"1 month": 30, "1 year": 365, "10 years": 3650, "Everything": None}
-    chosen = st.sidebar.segmented_control(
-        "Jump to", list(quick_ranges), default=None, key="quick"
-    )
-    if chosen is not None:
-        days = quick_ranges[chosen]
-        first = data_start if days is None else max(data_start, data_end - timedelta(days=days))
-        st.session_state["time_range"] = (first, data_end)
-    if "time_range" not in st.session_state:
-        st.session_state["time_range"] = (
-            max(data_start, data_end - timedelta(days=365)),
-            data_end,
-        )
-    time_range = st.sidebar.date_input(
-        "From / to", min_value=data_start, max_value=data_end, key="time_range"
-    )
-    if len(time_range) != 2:
-        st.warning("Pick both a start and an end date.")
-        st.stop()
-    window = df.loc[str(time_range[0]) : str(time_range[1])]
-    period_label = f"{time_range[0]} to {time_range[1]}"
 
 if window.empty:
     st.warning("No data in the selected period.")
     st.stop()
 
 
-# --- Refinements (sidebar) ------------------------------------------------
-
-full_min = float(df["speed"].min() * factor)
-full_max = float(df["speed"].max() * factor)
-with st.sidebar.expander("Wind range and detail", expanded=False):
-    low, high = st.slider(
-        f"Min / max ({unit})",
-        min_value=round(full_min, 1),
-        max_value=round(full_max, 1),
-        value=(round(full_min, 1), round(full_max, 1)),
-        step=0.5,
-        # Separate keys so switching units doesn't clamp the other unit's selection.
-        key=f"speed_band_{unit}",
-    )
-    aggregations = {
-        "Hourly": None,
-        "Daily mean": ("1D", "mean"),
-        "Daily max": ("1D", "max"),
-        "Monthly mean": ("1MS", "mean"),
-    }
-    aggregation = st.selectbox("Aggregation", list(aggregations), index=1)
-rule = aggregations[aggregation]
-st.sidebar.caption(f"{low:g}–{high:g} {unit} · {aggregation.lower()}")
-
-
 # --- Build one series per session -----------------------------------------
 
 
 def prepare(hours):
-    """Restrict to the session hours, resample, and convert to the chosen unit."""
+    """Daily means over the session hours, in the chosen unit."""
     sub = window[hour_mask(window.index, hours)]
     if sub.empty:
         return sub
-    if rule is not None:
-        freq, how = rule
-        resampled = sub.resample(freq)
-        sub = pd.DataFrame({"speed": getattr(resampled["speed"], how)()}).dropna()
-    return sub[["speed"]] * factor
+    return sub["speed"].resample("1D").mean().dropna().to_frame() * factor
 
 
 prepared = [(label, prepare(hours)) for label, hours in sessions]
 active = [(label, s) for label, s in prepared if not s.empty]
 
-if windy_view:
-    # One set of hours drives the metrics, the month chart and the rose.
-    hour_choices = {label: hours for label, hours in sessions}
-    hour_choices["All day"] = None
-    picked_hours_label = st.sidebar.selectbox(
-        "Hours to count", list(hour_choices), key="windy_hours"
-    )
-    picked_hours = hour_choices[picked_hours_label]
-    summary_items = [(picked_hours_label, prepare(picked_hours))]
-else:
-    summary_items = prepared
-
-st.caption(f"Showing **{period_label}** · {aggregation.lower()} · {unit}")
-
-
-# --- Summary --------------------------------------------------------------
-
-st.caption(
-    f"Across **{period_label}**, using the {aggregation.lower()} of each period. "
-    "“In wind range” is how often that value landed inside your min/max slider."
-)
-
-for label, series in summary_items:
-    st.markdown(f"**{label}**")
-    cols = st.columns(4)
-    if series.empty:
-        for i, name in enumerate(("Max", "Min", "Mean")):
-            cols[i].metric(f"{name} ({unit})", "—")
-        cols[3].metric("In wind range", "0")
-        continue
-
-    in_band = series["speed"].between(low, high)
-    selected = series.loc[in_band, "speed"]
-    if selected.empty:
-        for i, name in enumerate(("Max", "Min", "Mean")):
-            cols[i].metric(f"{name} ({unit})", "—")
-    else:
-        cols[0].metric(
-            f"Max ({unit})", f"{selected.max():.1f}", help=str(selected.idxmax().date())
-        )
-        cols[1].metric(
-            f"Min ({unit})", f"{selected.min():.1f}", help=str(selected.idxmin().date())
-        )
-        cols[2].metric(f"Mean ({unit})", f"{selected.mean():.1f}")
-    share = in_band.sum() / len(series) * 100
-    cols[3].metric(
-        "In wind range", f"{share:.0f}%", help=f"{int(in_band.sum()):,} of {len(series):,} points"
-    )
+st.caption(f"Showing **{period_label}** in {unit}")
 
 
 # --- Plots ----------------------------------------------------------------
@@ -1601,7 +1502,8 @@ if windy_view:
     )
 
     thresholds = ladder_for(activity, unit)
-    sub = window[hour_mask(window.index, picked_hours)]
+    # The hours from "When you sail" drive the month chart and the rose.
+    sub = window[sessions_mask(window.index, SESSION_WINDOWS)]
     if sub.empty:
         st.warning("No data for the selected hours.")
         st.stop()
@@ -1695,7 +1597,7 @@ if windy_view:
     st.caption(
         f"Share of days in {period_label} where the wind "
         f"{'reached' if how == 'max' else 'averaged above'} each speed, "
-        f"counting only {picked_hours_label.lower()}."
+        f"counting {SESSION_TEXT} (local time)."
     )
 
     with st.expander("Exact percentages"):
@@ -1703,11 +1605,11 @@ if windy_view:
             table.set_axis([calendar.month_name[m] for m in range(1, 13)]).round(0),
             width="stretch",
         )
-elif month_view:
+else:
     st.subheader(f"{calendar.month_name[month]} compared across years")
     style = st.sidebar.radio(
         "Show as",
-        ["Year by year", "Spread", "Calendar", "Time of day"],
+        ["Year by year", "Calendar", "Time of day"],
         key="chart_style",
     )
 
@@ -1732,35 +1634,6 @@ elif month_view:
         ax.grid(True, alpha=0.3)
         ax.legend(loc="best", fontsize="small")
         ax.set_title("Line: average for the month · shaded: typical spread · dashed: long-run normal")
-
-    elif style == "Spread":
-        # Box plots answer "how reliable is the wind", not just the average.
-        fig, ax = plt.subplots(figsize=(12, 4.5))
-        count = max(len(active), 1)
-        box_width = 0.8 / count
-        for i, ((label, series), color) in enumerate(zip(active, SESSION_COLORS)):
-            by_year = [series.loc[series.index.year == y, "speed"].values for y in years]
-            offset = -0.4 + box_width * (i + 0.5)
-            bp = ax.boxplot(
-                by_year,
-                positions=np.arange(len(years)) + offset,
-                widths=box_width * 0.85,
-                patch_artist=True,
-                showfliers=False,
-                medianprops=dict(color="black", lw=1.2),
-            )
-            for patch in bp["boxes"]:
-                patch.set_facecolor(color)
-                patch.set_alpha(0.55)
-                patch.set_edgecolor(color)
-            ax.plot([], [], color=color, lw=6, alpha=0.55, label=label)
-        ax.axhspan(low, high, color="grey", alpha=0.08)
-        ax.set_ylabel(unit)
-        ax.set_xticks(np.arange(len(years)))
-        ax.set_xticklabels(years, rotation=90 if len(years) > 20 else 0, fontsize=8)
-        ax.grid(True, axis="y", alpha=0.3)
-        ax.legend(loc="best", fontsize="small")
-        ax.set_title("Box: middle half of all readings · line: median · shaded band: your wind range")
 
     elif style == "Calendar":
         # Every day of the month, one row per year — good for spotting whether
@@ -1808,7 +1681,10 @@ elif month_view:
             if hours is None:
                 continue
             ax.axvspan(hours[0], hours[1], color=color, alpha=0.15, label=label)
-        ax.axhspan(low, high, color="grey", alpha=0.08)
+        # The sport's range is set in knots; shade it in the unit on screen.
+        to_unit = factor / MS_TO_KNOTS
+        ax.axhspan(groove_low * to_unit, groove_high * to_unit, color="grey", alpha=0.08,
+                   label=f"{activity} range")
         ax.set_xticks(range(0, 24))
         ax.set_xticklabels([f"{h:02d}" for h in range(24)], fontsize=8)
         ax.set_xlabel(f"hour of day ({LOCAL_TZ})")
@@ -1830,32 +1706,11 @@ elif month_view:
             )
         if summaries:
             st.dataframe(pd.concat(summaries, axis=1).round(1), width="stretch")
-else:
-    st.subheader(f"Wind speed — {aggregation.lower()}")
-
-    fig, ax = plt.subplots(figsize=(12, 4))
-    for (label, series), color in zip(prepared, SESSION_COLORS):
-        if series.empty:
-            continue
-        banded = series["speed"].where(series["speed"].between(low, high))
-        # Faint full trace for context, solid where it falls inside the speed band.
-        ax.plot(series.index, series["speed"], color=color, lw=0.6, alpha=0.25)
-        ax.plot(banded.index, banded, color=color, lw=0.8, label=label)
-    ax.axhspan(low, high, color="grey", alpha=0.07)
-    ax.set_ylabel(unit)
-    if high > low:
-        margin = (high - low) * 0.05
-        ax.set_ylim(low - margin, high + margin)
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc="upper right", fontsize="small")
-    style_figure(fig, ax)
-    plt.tight_layout()
-    st.pyplot(fig, width="stretch")
 
 with st.expander("View data"):
     tables = []
     for label, series in active:
-        table = series[series["speed"].between(low, high)].copy()
+        table = series.copy()
         table.insert(0, "session", label)
         tables.append(table)
     if tables:
@@ -1868,4 +1723,4 @@ with st.expander("View data"):
             mime="text/csv",
         )
     else:
-        st.write("Nothing matches the current filters.")
+        st.write("No readings in your sailing hours for this period.")
