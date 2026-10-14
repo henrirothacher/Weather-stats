@@ -17,7 +17,7 @@ from folium.plugins import MiniMap
 from streamlit_folium import st_folium
 from timezonefinder import TimezoneFinder
 
-st.set_page_config(page_title="Wind Atlas - ERA5 Sailing Forecasts", layout="wide")
+st.set_page_config(page_title="Wind Atlas · ERA5 wind history", layout="wide")
 
 st.html(
     """
@@ -975,6 +975,10 @@ def rate_location(path, mtime, zone, first_year, activity, windows):
     knots = usable["speed"] * MS_TO_KNOTS
 
     low, high = ACTIVITIES[activity]["groove"]
+    # A big day reaches the third speed band. The top of the range is the
+    # wrong mark: reaching it means too much wind, and ERA5's smoothed hourly
+    # winds almost never get there.
+    strong = ACTIVITIES[activity]["ladder"][-2]
     by_day = knots.resample("1D")
     daily = by_day.mean().dropna()
     spread = (by_day.std() / by_day.mean()).dropna()
@@ -982,7 +986,7 @@ def rate_location(path, mtime, zone, first_year, activity, windows):
     in_groove = daily.between(low, high)
     groove = in_groove.mean() * 100
     too_light = (daily < low).mean() * 100
-    big = (by_day.max().dropna() >= high).mean() * 100
+    big = (by_day.max().dropna() >= strong).mean() * 100
     steadiness = max(0.0, 1 - float(spread.mean()) / GUSTY_CV)
 
     per_month = in_groove.groupby(daily.index.month).mean() * 100
@@ -1003,7 +1007,7 @@ def rate_location(path, mtime, zone, first_year, activity, windows):
             steadiness * 10,
             f"typical day varies {float(spread.mean()) * 100:.0f}% around its mean",
         ),
-        "Big days": (min(big / 3, 10), f"{big:.0f}% of days touch {high} kt"),
+        "Big days": (min(big / 3, 10), f"{big:.0f}% of days touch {strong} kt"),
     }
     overall = sum(score * RATING_WEIGHTS[name] for name, (score, _) in parts.items())
 
@@ -1202,8 +1206,8 @@ if st.session_state["mode"] == "compare":
     )
     if not others:
         st.info(
-            "Only one location is downloaded so far. Use **Pick another location** "
-            "to choose a second spot and fetch it, then come back here."
+            "Only one location is downloaded so far. Press **Start over**, pick a "
+            "second spot on the map and fetch it, then come back here."
         )
         st.stop()
 
@@ -1370,7 +1374,7 @@ if st.session_state["mode"] == "rating":
     highlights[0].metric(
         "Best month", calendar.month_name[rating["best_month"]], border=True,
         icon=":material/trending_up:",
-        help=f"{rating['best_month_pct']:.0f}% of days reach 9 kt",
+        help=f"{rating['best_month_pct']:.0f}% of days sit in {groove_low}–{groove_high} kt",
         chart_data=rating["month_curve"], chart_type="area",
     )
     highlights[1].metric(
