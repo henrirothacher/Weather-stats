@@ -288,6 +288,12 @@ def ladder_for(activity, unit):
     return [round(value / MS_TO_KNOTS * 2) / 2 for value in knots]
 
 
+def can_score(activity):
+    """A range that starts at 0 kt counts every day as sailable, so a score
+    would say nothing about the spot — such a choice is for exploring only."""
+    return ACTIVITIES[activity]["groove"][0] > 0
+
+
 def remember_location(latitude, longitude, name, zone):
     registry = load_registry()
     registry[f"{latitude:+.2f}_{longitude:+.2f}"] = {
@@ -803,7 +809,8 @@ if st.session_state["spot"] is None:
     st.stop()
 
 
-st.session_state.setdefault("activity", "Any wind")
+# Open on a sport rather than "Any wind", which cannot be rated or compared.
+st.session_state.setdefault("activity", "Dinghy")
 activity = st.session_state["activity"]
 spot = st.session_state["spot"]
 LATITUDE, LONGITUDE = spot["lat"], spot["lon"]
@@ -1062,7 +1069,6 @@ if st.session_state["mode"] is None:
     locator_map(LATITUDE, LONGITUDE, key="start_map", height=300)
 
     st.write("")
-    st.session_state.setdefault("activity", "Any wind")
     st.session_state["activity"] = pick(
         st.segmented_control(
             "Step 2 · What are you sailing?", list(ACTIVITIES),
@@ -1072,11 +1078,18 @@ if st.session_state["mode"] is None:
         ),
         st.session_state["activity"],
     )
-    groove_low, groove_high = ACTIVITIES[st.session_state["activity"]]["groove"]
-    st.caption(
-        f"Scoring and the speed bands use {groove_low}–{groove_high} kt as the "
-        "range worth going out in."
-    )
+    chosen = st.session_state["activity"]
+    groove_low, groove_high = ACTIVITIES[chosen]["groove"]
+    if can_score(chosen):
+        st.caption(
+            f"Scoring and the speed bands use {groove_low}–{groove_high} kt as the "
+            "range worth going out in."
+        )
+    else:
+        st.caption(
+            f"{chosen} counts every day from {groove_low} to {groove_high} kt, so "
+            "it is for exploring only. Pick a sport to rate or compare spots."
+        )
 
     st.write("")
     st.markdown("###### Step 3 · What do you want to see?")
@@ -1110,7 +1123,8 @@ if st.session_state["mode"] is None:
             st.markdown(f"#### {heading}")
             st.write(blurb)
             st.space("stretch")
-            if st.button(action, width="stretch", type="secondary"):
+            locked = target != "explore" and not can_score(chosen)
+            if st.button(action, width="stretch", type="secondary", disabled=locked):
                 st.session_state["mode"] = target
                 st.session_state.pop("last_mode", None)
                 st.session_state["rating_fresh"] = target == "rating"
@@ -1161,6 +1175,15 @@ SESSION_TEXT = " and ".join(
     "all day" if hours is None else f"{hours[0]:02d}:00–{hours[1]:02d}:59"
     for hours in SESSION_WINDOWS
 )
+
+# Forward, or switching sport in the sidebar, can land here with a range
+# that has nothing to score.
+if st.session_state["mode"] in ("rating", "compare") and not can_score(activity):
+    st.info(
+        f"**{activity}** counts every day as sailable, so there is nothing to "
+        "score. Pick what you sail in the sidebar."
+    )
+    st.stop()
 
 
 # --- Compare two locations ------------------------------------------------
