@@ -1083,33 +1083,34 @@ if st.session_state["mode"] is None:
     st.markdown("###### Step 3 · What do you want to see?")
     cards = [
         (
-            ":material/insights: Explore and compare",
-            "Dig through the record yourself — windy days per month, sailing "
-            "sessions by hour, month-against-month across the years, and where "
-            "the wind blows from.",
+            ":material/insights: Explore the data",
+            "Windy days per month, sessions by hour, year-on-year trends and "
+            "wind direction.",
             "Start exploring",
             "explore",
         ),
         (
             ":material/star: Rate this spot",
-            "One verdict for the whole location, judged for what you sail: days "
-            "in the groove, season length, steadiness — scored out of ten.",
+            "One score out of ten for what you sail: days in the groove, "
+            "season length and steadiness.",
             "Rate the location",
             "rating",
         ),
         (
             ":material/compare_arrows: Compare two spots",
-            "Put this location head to head with another you have downloaded — "
-            "scores, month by month, and where the wind comes from at each.",
+            "Put this spot against another you have downloaded: scores, months "
+            "and wind direction.",
             "Compare locations",
             "compare",
         ),
     ]
-    # Fixed height and one button style keep all three cards identical.
+    # Fixed height keeps all three cards identical; the stretch spacer pins
+    # each button to the bottom however many lines the blurb wraps to.
     for column, (heading, blurb, action, target) in zip(st.columns(3), cards):
-        with column.container(border=True, height=260):
-            st.markdown(f"### {heading}")
+        with column.container(border=True, height=230):
+            st.markdown(f"#### {heading}")
             st.write(blurb)
+            st.space("stretch")
             if st.button(action, width="stretch", type="secondary"):
                 st.session_state["mode"] = target
                 st.session_state.pop("last_mode", None)
