@@ -204,11 +204,10 @@ GRID = 0.25
 # What you sail decides which winds count. Ladder = the four bands on the
 # monthly chart; groove = the range you actually want, both in knots.
 ACTIVITIES = {
-    "Any wind": {"ladder": [9, 13, 17, 22], "groove": (9, 30), "icon": ":material/air:"},
-    "Dinghy": {"ladder": [6, 9, 13, 18], "groove": (8, 16), "icon": ":material/sailing:"},
-    "Foil": {"ladder": [7, 10, 14, 18], "groove": (9, 18), "icon": ":material/waves:"},
-    "Kite": {"ladder": [10, 14, 18, 24], "groove": (14, 25), "icon": ":material/paragliding:"},
-    "Windsurf": {"ladder": [12, 16, 20, 25], "groove": (16, 28), "icon": ":material/surfing:"},
+    "Any wind": {"ladder": [6, 12, 18, 24], "groove": (0, 30), "icon": ":material/air:"},
+    "Dinghy": {"ladder": [6, 10, 15, 20], "groove": (6, 25), "icon": ":material/sailing:"},
+    "Foil": {"ladder": [12, 16, 20, 25], "groove": (12, 30), "icon": ":material/waves:"},
+    "Kite": {"ladder": [15, 20, 26, 32], "groove": (15, 40), "icon": ":material/paragliding:"},
 }
 # Within-day spread above this counts as thoroughly gusty (see calibration in
 # the data: median day sits near 0.25).
