@@ -1,7 +1,9 @@
 import calendar
+import io
 import json
 import time
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from pathlib import Path
 
@@ -11,6 +13,7 @@ import folium
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import requests
 import streamlit as st
 import xarray as xr
 from folium.plugins import MiniMap
@@ -18,7 +21,7 @@ from streamlit_folium import st_folium
 from timezonefinder import TimezoneFinder
 
 st.set_page_config(
-    page_title="Wind Atlas · ERA5 wind history", layout="wide",
+    page_title="Wind Atlas · hourly wind history", layout="wide",
     initial_sidebar_state="expanded",
 )
 
@@ -353,6 +356,17 @@ data_dir = Path("data")
 data_dir.mkdir(exist_ok=True)
 REGISTRY = data_dir / "locations.json"
 
+# Where the wind comes from: a model cell anywhere on earth, or a MeteoSwiss
+# station that measured it. Both end up in the same file layout.
+SOURCES = {
+    "era5": ":material/public: ERA5 · worldwide",
+    "meteoswiss": ":material/sensors: MeteoSwiss · Swiss stations",
+}
+# MeteoSwiss open data: free, no account, semicolon CSV per station.
+OGD_ROOT = "https://data.geo.admin.ch/ch.meteoschweiz.ogd-smn"
+OGD_ITEMS = "https://data.geo.admin.ch/api/stac/v1/collections/ch.meteoschweiz.ogd-smn/items"
+SWISS_CENTRE = (46.8, 8.2)
+
 
 def cds_client():
     """Credentials come from Streamlit secrets when deployed, or from
@@ -386,6 +400,124 @@ def dataset_for(latitude, longitude):
     return data_dir / f"wind_{latitude:+.2f}_{longitude:+.2f}.nc"
 
 
+def station_dataset(abbr):
+    """One cached netCDF per MeteoSwiss station."""
+    return data_dir / f"station_{abbr}.nc"
+
+
+def ogd_csv(url, **options):
+    """MeteoSwiss serves semicolon-separated CSV in Windows-1252."""
+    response = requests.get(url, timeout=60)
+    response.raise_for_status()
+    return pd.read_csv(io.BytesIO(response.content), sep=";", encoding="cp1252", **options)
+
+
+@st.cache_data(ttl="1d", show_spinner="Loading the MeteoSwiss stations...")
+def meteoswiss_stations():
+    """SwissMetNet stations that measure hourly wind, and since when."""
+    stations = ogd_csv(f"{OGD_ROOT}/ogd-smn_meta_stations.csv").set_index("station_abbr")
+    inventory = ogd_csv(f"{OGD_ROOT}/ogd-smn_meta_datainventory.csv")
+    offered = inventory.groupby("parameter_shortname")["station_abbr"].agg(set)
+    windy = offered.get("fkl010h0", set()) & offered.get("dkl010h0", set())
+    since = (
+        inventory[inventory["parameter_shortname"] == "fkl010h0"]
+        .set_index("station_abbr")["data_since"]
+    )
+    table = pd.DataFrame({
+        "name": stations["station_name"],
+        "lat": stations["station_coordinates_wgs84_lat"],
+        "lon": stations["station_coordinates_wgs84_lon"],
+        "height": stations["station_height_masl"],
+    })
+    table = table[table.index.isin(windy)].copy()
+    table["since"] = pd.to_datetime(
+        since.reindex(table.index), format="%d.%m.%Y %H:%M"
+    ).dt.year
+    table["has_temp"] = table.index.isin(offered.get("tre200h0", set()))
+    return table.sort_values("name")
+
+
+def nearest_station(stations, latitude, longitude):
+    """The station closest to a click, and how far away it is in km."""
+    # A flat projection is plenty across a country this size.
+    east = np.radians(stations["lon"] - longitude) * np.cos(np.radians(latitude))
+    north = np.radians(stations["lat"] - latitude)
+    km = np.hypot(east, north) * 6371
+    abbr = km.idxmin()
+    return abbr, float(km[abbr])
+
+
+def fetch_station(spot, target, progress=None):
+    """Every hourly file MeteoSwiss holds for a station (one per decade, plus
+    this year up to yesterday) joined into one record. Stored in the same
+    layout as an ERA5 download, so everything downstream reads both.
+    `progress(done, total)` hears about each file as it lands."""
+    item = requests.get(f"{OGD_ITEMS}/{spot['station'].lower()}", timeout=60)
+    item.raise_for_status()
+    # Historical sorts before recent, so where the two meet, recent wins.
+    urls = sorted(
+        asset["href"] for name, asset in item.json()["assets"].items()
+        if "_h_historical_" in name or name.endswith("_h_recent.csv")
+    )
+    if not urls:
+        raise RuntimeError("MeteoSwiss lists no hourly data for this station")
+    wanted = {"reference_timestamp", "fkl010h0", "dkl010h0", "tre200h0"}
+    # MeteoSwiss serves each connection slowly, so fetch the files side by side.
+    with ThreadPoolExecutor(max_workers=len(urls)) as pool:
+        jobs = [
+            pool.submit(ogd_csv, url, usecols=lambda column: column in wanted)
+            for url in urls
+        ]
+        for done, _ in enumerate(as_completed(jobs), 1):
+            if progress:
+                progress(done, len(jobs))
+        # Joined in URL order, not arrival order, for the recent-wins rule.
+        frame = pd.concat([job.result() for job in jobs], ignore_index=True)
+
+    stamp = pd.to_datetime(frame["reference_timestamp"], format="%d.%m.%Y %H:%M")
+    # Timestamps are UTC and mark the end of the hour (16:00 = 15:10–16:00),
+    # so step each back to the hour it covers. Before 2018 the hour ran
+    # 15:50–16:40 and already carries the right label.
+    stamp = stamp - pd.to_timedelta((stamp >= "2018-01-01").astype(int), unit="h")
+    frame = (
+        frame.assign(time=stamp)
+        .dropna(subset=["fkl010h0", "dkl010h0"])
+        .drop_duplicates("time", keep="last")
+        .sort_values("time")
+    )
+    if frame.empty:
+        raise RuntimeError("This station has no wind readings yet")
+
+    # Stations report speed and where the wind comes from; ERA5 gives the
+    # eastward and northward parts. Convert so the two read the same.
+    speed = frame["fkl010h0"].to_numpy(dtype="float32")
+    bearing = np.radians(frame["dkl010h0"].to_numpy(dtype="float32"))
+    data = {
+        "u10": ("valid_time", -speed * np.sin(bearing)),
+        "v10": ("valid_time", -speed * np.cos(bearing)),
+    }
+    if "tre200h0" in frame and frame["tre200h0"].notna().any():
+        # Kelvin, as ERA5 stores it.
+        data["t2m"] = ("valid_time", frame["tre200h0"].to_numpy(dtype="float32") + 273.15)
+
+    # The file carries its own station details, so it lists properly even
+    # without data/locations.json.
+    dataset = xr.Dataset(
+        data,
+        coords={"valid_time": frame["time"].to_numpy(dtype="datetime64[ns]")},
+        attrs={
+            "source": "MeteoSwiss SwissMetNet (CC BY 4.0)",
+            "station": spot["station"], "name": spot["name"],
+            "lat": float(spot["lat"]), "lon": float(spot["lon"]),
+            "height": float(spot["height"]),
+        },
+    )
+    partial = target.with_suffix(".part")
+    dataset.to_netcdf(partial)
+    partial.replace(target)
+    return target
+
+
 def ladder_for(activity, unit):
     """The four speed bands, converted to whatever unit is on screen."""
     knots = ACTIVITIES[activity]["ladder"]
@@ -400,11 +532,16 @@ def can_score(activity):
     return ACTIVITIES[activity]["groove"][0] > 0
 
 
-def remember_location(latitude, longitude, name, zone):
+def spot_key(spot):
+    """Registry key: the grid cell for ERA5, the station code for MeteoSwiss."""
+    if spot.get("station"):
+        return f"station_{spot['station']}"
+    return f"{spot['lat']:+.2f}_{spot['lon']:+.2f}"
+
+
+def remember_location(spot):
     registry = load_registry()
-    registry[f"{latitude:+.2f}_{longitude:+.2f}"] = {
-        "lat": latitude, "lon": longitude, "name": name, "zone": zone,
-    }
+    registry[spot_key(spot)] = spot
     REGISTRY.write_text(json.dumps(registry, indent=2))
 
 
@@ -418,7 +555,7 @@ def load_registry():
 
 
 def downloaded_locations():
-    """Every grid cell already on disk, named where we know the name."""
+    """Every grid cell and station already on disk, named where we know the name."""
     registry = load_registry()
     found = {}
     for path in sorted(data_dir.glob("wind_*.nc")):
@@ -435,6 +572,18 @@ def downloaded_locations():
                 "zone": timezone_at(latitude, longitude),
             }
         found[key] = {**entry, "path": path}
+    for path in sorted(data_dir.glob("station_*.nc")):
+        entry = registry.get(path.stem)
+        if entry is None:
+            with xr.open_dataset(path) as ds:
+                details = ds.attrs
+                entry = {
+                    "lat": float(details["lat"]), "lon": float(details["lon"]),
+                    "name": str(details["name"]), "station": str(details["station"]),
+                    "height": float(details["height"]),
+                }
+            entry["zone"] = timezone_at(entry["lat"], entry["lon"])
+        found[path.stem] = {**entry, "path": path}
     return found
 
 
@@ -658,6 +807,11 @@ MAP_CHROME_CSS = """
     box-shadow: 0 0 0 4px rgba(142,202,230,.22), 0 2px 6px rgba(0,0,0,.45);
 }
 .spot-dot.picked { background: #fb8500; box-shadow: 0 0 0 5px rgba(251,133,0,.25), 0 2px 8px rgba(0,0,0,.5); }
+/* A station you have not downloaded: present, but quieter than your spots. */
+.spot-dot.idle {
+    width: 9px; height: 9px; margin: 2px; background: #5b6b7a;
+    border: 1.5px solid rgba(255,255,255,.6); box-shadow: 0 1px 4px rgba(0,0,0,.4);
+}
 .spot-dot.picked::after {
     content: ""; position: absolute; inset: -5px; border-radius: 50%;
     border: 2px solid rgba(251,133,0,.55);
@@ -761,9 +915,9 @@ SPOT_HOVER_SCRIPT = """
 """
 
 
-def dot_marker(latitude, longitude, tooltip, picked=False):
+def dot_marker(latitude, longitude, tooltip, picked=False, idle=False):
     """A designed dot rather than folium's default pin."""
-    classes = "spot-dot picked" if picked else "spot-dot"
+    classes = "spot-dot picked" if picked else "spot-dot idle" if idle else "spot-dot"
     return folium.Marker(
         [latitude, longitude],
         tooltip=tooltip,
@@ -787,9 +941,9 @@ def base_map(**options):
     return chart
 
 
-def locator_map(latitude, longitude, key, height=230):
+def locator_map(latitude, longitude, key, height=230, cell=True):
     """The cell against the coastline, so you can see whether the water you
-    care about is actually water.
+    care about is actually water. A station is a point, so it gets no cell.
 
     An offshore cell can sit a thousand miles from the nearest land, where a
     close view is an empty square of ocean — hence the zoom controls and the
@@ -803,14 +957,15 @@ def locator_map(latitude, longitude, key, height=230):
         position="bottomleft", width=104, height=104,
         zoom_level_offset=-6, toggle_display=True,
     ).add_to(local)
-    folium.Rectangle(
-        bounds=[
-            [latitude - GRID / 2, longitude - GRID / 2],
-            [latitude + GRID / 2, longitude + GRID / 2],
-        ],
-        color="#fb8500", weight=2, fill=True, fill_opacity=0.25,
-    ).add_to(local)
-    dot_marker(latitude, longitude, "Your cell", picked=True).add_to(local)
+    if cell:
+        folium.Rectangle(
+            bounds=[
+                [latitude - GRID / 2, longitude - GRID / 2],
+                [latitude + GRID / 2, longitude + GRID / 2],
+            ],
+            color="#fb8500", weight=2, fill=True, fill_opacity=0.25,
+        ).add_to(local)
+    dot_marker(latitude, longitude, "Your cell" if cell else "Station", picked=True).add_to(local)
     st_folium(local, height=height, use_container_width=True, key=key,
               returned_objects=[])
 
@@ -873,17 +1028,50 @@ def best_window(series_knots, length=3):
 
 if "spot" not in st.session_state:
     st.session_state["spot"] = None
+# Kept apart from the switch's own key, which Streamlit drops while the
+# landing is off screen, so Back returns you to the source you were using.
+st.session_state.setdefault("data_source", "era5")
 
 
-def enter_spot(latitude, longitude, zone, name):
-    st.session_state["spot"] = {
-        "lat": latitude, "lon": longitude, "zone": zone, "name": name,
-    }
-    remember_location(latitude, longitude, name, zone)
+def enter_spot(spot):
+    st.session_state["spot"] = spot
+    remember_location(spot)
 
 
 if st.session_state["spot"] is None:
     saved = downloaded_locations()
+    # The switch sits below the hero it rewrites, so read its value ahead.
+    source = st.session_state.get("source_pick") or st.session_state["data_source"]
+    stations, stations_error = None, None
+    if source == "meteoswiss":
+        try:
+            stations = meteoswiss_stations()
+        except Exception as error:
+            stations_error = error
+
+    if source == "meteoswiss":
+        pitch = (
+            "Click any MeteoSwiss weather station and pull every hour it has "
+            "measured. Real readings from the shore rather than a 25 km model "
+            "cell, so lakes and valleys get their own wind. "
+        )
+        facts = [
+            (f"{stations['since'].min():.0f}" if stations is not None else "1981",
+             "first year on record"),
+            ("Measured", "not modelled"),
+            (len(stations) if stations is not None else "150+", "stations with wind"),
+        ]
+    else:
+        pitch = (
+            "Click any stretch of water and pull every hour of wind since 1940 "
+            "for that spot. "
+        )
+        facts = [
+            ("1940", "first year on record"),
+            ("Hourly", "every day since"),
+            ("25 km", "per grid cell"),
+        ]
+    facts.append((len(saved), "spots downloaded"))
 
     st.html(
         '<div class="landing">'
@@ -892,8 +1080,7 @@ if st.session_state["spot"] is None:
         '<div class="landing-eyebrow">Wind history for sailors</div>'
         '<div class="landing-title">Find where the <span class="wind">wind</span> '
         "really blows</div>"
-        '<div class="landing-sub">Click any stretch of water and pull every hour of '
-        "wind since 1940 for that spot. See how often it is sailable for what you "
+        f'<div class="landing-sub">{pitch}See how often it is sailable for what you '
         "ride, in which months, at what time of day — and how it stacks up against "
         "your other spots.</div>"
         '<div class="landing-steps">'
@@ -902,26 +1089,50 @@ if st.session_state["spot"] is None:
         "<span><b>3</b>Rate, explore or compare</span>"
         "</div></div>"
         '<div class="landing-facts">'
-        "<div><b>1940</b><span>first year on record</span></div>"
-        "<div><b>Hourly</b><span>every day since</span></div>"
-        "<div><b>25 km</b><span>per grid cell</span></div>"
-        f"<div><b>{len(saved)}</b><span>spots downloaded</span></div>"
-        "</div></div></div>"
+        + "".join(f"<div><b>{value}</b><span>{label}</span></div>" for value, label in facts)
+        + "</div></div></div>"
     )
 
-    preset = pick(
-        st.segmented_control(
-            "Jump to a known spot", list(PRESETS), default=None, key="preset",
-        ),
-        None,
-    )
+    preset, found = None, None
+    with st.container(horizontal=True, vertical_alignment="bottom", gap="large"):
+        source = st.segmented_control(
+            "Data source", list(SOURCES), format_func=SOURCES.get,
+            default=st.session_state["data_source"], required=True, key="source_pick",
+        )
+        st.session_state["data_source"] = source
+        if source == "era5":
+            preset = pick(
+                st.segmented_control(
+                    "Jump to a known spot", list(PRESETS), default=None, key="preset",
+                ),
+                None,
+            )
+        elif stations is not None:
+            found = st.selectbox(
+                "Find a station", list(stations.index), index=None,
+                format_func=lambda abbr: f"{stations.loc[abbr, 'name']} · {abbr}",
+                placeholder=f"Search {len(stations)} stations", key="station_find",
+                width=320,
+            )
     if preset and st.session_state.get("preset_applied") != preset:
         st.session_state["preset_applied"] = preset
         st.session_state["clicked"] = PRESETS[preset]
         st.session_state["recentre"] = PRESETS[preset]
         st.rerun()
+    if found and st.session_state.get("station_find_applied") != found:
+        st.session_state["station_find_applied"] = found
+        st.session_state["station_pick"] = found
+        st.session_state["station_click_km"] = None
+        st.session_state["station_recentre"] = True
+        st.rerun()
+    if stations_error is not None:
+        st.error(f"Could not load the MeteoSwiss stations: {stations_error}")
+        st.stop()
 
     clicked = st.session_state.get("clicked")
+    picked = st.session_state.get("station_pick")
+    if stations is None or picked not in stations.index:
+        picked = None
     # Map and your spots side by side, so hovering a spot can show it on the map.
     if saved:
         map_col, list_col = st.columns([3, 2], gap="medium")
@@ -929,50 +1140,106 @@ if st.session_state["spot"] is None:
         map_col, list_col = st.container(), None
 
     with map_col:
-        centre = clicked or (30.0, 5.0)
-        world = base_map(
-            location=list(centre),
-            zoom_start=7 if clicked else 3,
-            control_scale=True,
-            min_zoom=2,
-            world_copy_jump=True,
-        )
-        hint = "Click again to move your pick" if clicked else "Click anywhere on the water"
-        world.get_root().html.add_child(folium.Element(f'<div class="map-hint">{hint}</div>'))
-        # Everything already on disk, so the map doubles as your library.
-        for entry in saved.values():
-            dot_marker(entry["lat"], entry["lon"], entry["name"]).add_to(world)
-        if clicked:
-            cell_lat, cell_lon = snap_to_grid(clicked[0]), snap_to_grid(clicked[1])
-            folium.Rectangle(
-                bounds=[
-                    [cell_lat - GRID / 2, cell_lon - GRID / 2],
-                    [cell_lat + GRID / 2, cell_lon + GRID / 2],
-                ],
-                color="#fb8500", weight=2, fill=True, fill_opacity=0.25,
-                tooltip=f"{cell_lat:+.2f}, {cell_lon:+.2f}",
-            ).add_to(world)
-            dot_marker(cell_lat, cell_lon, "Selected cell", picked=True).add_to(world)
+        if source == "era5":
+            centre = clicked or (30.0, 5.0)
+            world = base_map(
+                location=list(centre),
+                zoom_start=7 if clicked else 3,
+                control_scale=True,
+                min_zoom=2,
+                world_copy_jump=True,
+            )
+            hint = "Click again to move your pick" if clicked else "Click anywhere on the water"
+            world.get_root().html.add_child(folium.Element(f'<div class="map-hint">{hint}</div>'))
+            # Everything already on disk, so the map doubles as your library.
+            for entry in saved.values():
+                dot_marker(entry["lat"], entry["lon"], entry["name"]).add_to(world)
+            if clicked:
+                cell_lat, cell_lon = snap_to_grid(clicked[0]), snap_to_grid(clicked[1])
+                folium.Rectangle(
+                    bounds=[
+                        [cell_lat - GRID / 2, cell_lon - GRID / 2],
+                        [cell_lat + GRID / 2, cell_lon + GRID / 2],
+                    ],
+                    color="#fb8500", weight=2, fill=True, fill_opacity=0.25,
+                    tooltip=f"{cell_lat:+.2f}, {cell_lon:+.2f}",
+                ).add_to(world)
+                dot_marker(cell_lat, cell_lon, "Selected cell", picked=True).add_to(world)
 
-        # st_folium keeps its own view across reruns, so a preset change has to
-        # push a new centre explicitly or only the panel below would update.
-        recentre = st.session_state.pop("recentre", None)
-        result = st_folium(
-            world, height=LANDING_MAP_HEIGHT, use_container_width=True, key="picker",
-            center=list(recentre) if recentre else None,
-            zoom=8 if recentre else None,
-            returned_objects=["last_clicked"],
+            # st_folium keeps its own view across reruns, so a preset change has to
+            # push a new centre explicitly or only the panel below would update.
+            recentre = st.session_state.pop("recentre", None)
+            result = st_folium(
+                world, height=LANDING_MAP_HEIGHT, use_container_width=True, key="picker",
+                center=list(recentre) if recentre else None,
+                zoom=8 if recentre else None,
+                returned_objects=["last_clicked"],
+            )
+        else:
+            focus = tuple(stations.loc[picked, ["lat", "lon"]]) if picked else SWISS_CENTRE
+            world = base_map(
+                location=list(focus), zoom_start=10 if picked else 8,
+                control_scale=True, min_zoom=6,
+            )
+            hint = (
+                "Click another station to switch" if picked
+                else "Click a station, or anywhere for the nearest one"
+            )
+            world.get_root().html.add_child(folium.Element(f'<div class="map-hint">{hint}</div>'))
+            # Every station is on the map; the ones you have downloaded stand out.
+            on_disk = {entry.get("station") for entry in saved.values()}
+            for abbr, row in stations.iterrows():
+                if abbr != picked:
+                    dot_marker(row["lat"], row["lon"], f"{row['name']} · {abbr}",
+                               idle=abbr not in on_disk).add_to(world)
+            if picked:
+                dot_marker(*focus, f"{stations.loc[picked, 'name']} · {picked}",
+                           picked=True).add_to(world)
+
+            recentre = st.session_state.pop("station_recentre", False)
+            result = st_folium(
+                world, height=LANDING_MAP_HEIGHT, use_container_width=True,
+                key="station_picker",
+                center=list(focus) if recentre else None,
+                zoom=10 if recentre else None,
+                returned_objects=["last_clicked", "last_object_clicked",
+                                  "last_object_clicked_count"],
+            )
+
+    if source == "era5":
+        latest = None
+        if result and result.get("last_clicked"):
+            latest = (result["last_clicked"]["lat"], result["last_clicked"]["lng"])
+        # st_folium replays its stored click on every rerun, so compare against
+        # the click we last consumed — not against the current selection. Doing
+        # the latter let a stale click overwrite a preset chosen a moment before.
+        if latest is not None and latest != st.session_state.get("click_seen"):
+            st.session_state["click_seen"] = latest
+            st.session_state["clicked"] = latest
+            st.rerun()
+    else:
+        # Same replay problem, with two kinds of click: a dot reports as an
+        # object click (counted, so the same dot twice still registers), open
+        # ground as a map click. Whichever moved on is the click just made.
+        state = result or {}
+        ground = state.get("last_clicked")
+        dot = state.get("last_object_clicked")
+        clicks = (
+            (ground["lat"], ground["lng"]) if ground else None,
+            state.get("last_object_clicked_count") or 0,
         )
-    latest = None
-    if result and result.get("last_clicked"):
-        latest = (result["last_clicked"]["lat"], result["last_clicked"]["lng"])
-    # st_folium replays its stored click on every rerun, so compare against
-    # the click we last consumed — not against the current selection. Doing
-    # the latter let a stale click overwrite a preset chosen a moment before.
-    if latest is not None and latest != st.session_state.get("click_seen"):
-        st.session_state["click_seen"] = latest
-        st.session_state["clicked"] = latest
-        st.rerun()
+        seen = st.session_state.get("station_clicks_seen", (None, 0))
+        if clicks != seen:
+            st.session_state["station_clicks_seen"] = clicks
+            if clicks[1] != seen[1]:
+                fresh = (dot["lat"], dot["lng"]) if dot else None
+            else:
+                fresh = clicks[0]
+            if fresh is not None:
+                abbr, km = nearest_station(stations, *fresh)
+                st.session_state["station_pick"] = abbr
+                st.session_state["station_click_km"] = km
+                st.rerun()
 
     if list_col is not None:
         with list_col:
@@ -984,19 +1251,19 @@ if st.session_state["spot"] is None:
             with st.container(height=LANDING_MAP_HEIGHT - 58, gap="xsmall"):
                 for index, (key, entry) in enumerate(saved.items()):
                     first, last = record_span(entry["path"], entry["path"].stat().st_mtime)
-                    zone_name = entry["zone"].split("/")[-1].replace("_", " ")
+                    if entry.get("station"):
+                        where = f"MeteoSwiss {entry['station']} · {entry['height']:.0f} m"
+                    else:
+                        zone_name = entry["zone"].split("/")[-1].replace("_", " ")
+                        where = f"ERA5 · {coords_label(entry['lat'], entry['lon'])} · {zone_name}"
                     # Keyed by position: the hover script below matches cards to
                     # spots by this number.
                     with st.container(key=f"spot_card_{index}", horizontal=True,
                                       vertical_alignment="center"):
-                        st.markdown(
-                            f"**{entry['name']}**  \n"
-                            f":gray[{coords_label(entry['lat'], entry['lon'])} · "
-                            f"{first}–{last} · {zone_name}]"
-                        )
+                        st.markdown(f"**{entry['name']}**  \n:gray[{where} · {first}–{last}]")
                         if st.button("Open", key=f"open_{key}",
                                      icon=":material/arrow_forward:", width="content"):
-                            enter_spot(entry["lat"], entry["lon"], entry["zone"], entry["name"])
+                            enter_spot({k: v for k, v in entry.items() if k != "path"})
                             st.rerun()
         spots = [
             {"lat": entry["lat"], "lon": entry["lon"], "name": entry["name"]}
@@ -1008,7 +1275,7 @@ if st.session_state["spot"] is None:
             unsafe_allow_javascript=True,
         )
 
-    if clicked:
+    if source == "era5" and clicked:
         raw_lat, raw_lon = clicked
         latitude, longitude = snap_to_grid(raw_lat), snap_to_grid(raw_lon)
         zone = timezone_at(latitude, longitude)
@@ -1036,7 +1303,46 @@ if st.session_state["spot"] is None:
                 )
                 if st.button(":material/arrow_forward: Use this location",
                              type="primary", width="stretch"):
-                    enter_spot(latitude, longitude, zone, name)
+                    enter_spot({"lat": latitude, "lon": longitude, "zone": zone, "name": name})
+                    st.rerun()
+
+    if picked:
+        row = stations.loc[picked]
+        zone = timezone_at(row["lat"], row["lon"])
+        cached = station_dataset(picked)
+        where = f"MeteoSwiss station {picked} · {coords_label(row['lat'], row['lon'])}"
+        km = st.session_state.get("station_click_km")
+        if km and km >= 1:
+            where += f" · nearest to your click, {km:.0f} km away"
+
+        with st.container(key="picked_panel"):
+            facts_row = st.columns([2, 2, 2, 3], vertical_alignment="center")
+            facts_row[0].metric("Your station", row["name"], icon=":material/sensors:",
+                                help=where)
+            facts_row[1].metric(
+                "Height", f"{row['height']:.0f} m", icon=":material/landscape:",
+                help="Above sea level. A station up a hill feels more wind than "
+                "the water below it.",
+            )
+            facts_row[2].metric(
+                "Data", "on disk" if cached.exists() else f"since {row['since']:.0f}",
+                icon=":material/database:",
+                help=None if row["has_temp"] else "Wind only: this station does not "
+                "record air temperature.",
+            )
+            with facts_row[3]:
+                known = load_registry().get(f"station_{picked}", {})
+                name = st.text_input(
+                    "Name this spot", value=known.get("name") or row["name"],
+                    key=f"name_station_{picked}",
+                )
+                if st.button(":material/arrow_forward: Use this station",
+                             type="primary", width="stretch"):
+                    enter_spot({
+                        "lat": float(row["lat"]), "lon": float(row["lon"]),
+                        "zone": zone, "name": name,
+                        "station": picked, "height": float(row["height"]),
+                    })
                     st.rerun()
     st.stop()
 
@@ -1047,13 +1353,19 @@ activity = st.session_state["activity"]
 spot = st.session_state["spot"]
 LATITUDE, LONGITUDE = spot["lat"], spot["lon"]
 LOCAL_TZ, LOCATION_NAME = spot["zone"], spot["name"]
-dataset_path = dataset_for(LATITUDE, LONGITUDE)
+# The MeteoSwiss station code, or None for an ERA5 cell.
+STATION = spot.get("station")
+SOURCE_CREDIT = f"MeteoSwiss station {STATION}" if STATION else "ERA5 reanalysis"
+dataset_path = station_dataset(STATION) if STATION else dataset_for(LATITUDE, LONGITUDE)
 
 # Navigation: step back one screen without losing the location.
 # One back / forward pair, plus the reset to the very beginning.
 # Back steps out of a view to the options, or off the options back to the map.
 # Forward returns to whichever view you last left.
 current_mode = st.session_state.get("mode")
+# What the map screen remembers about your last pick, cleared on the way back.
+LANDING_PICKS = ("clicked", "preset_applied", "station_pick", "station_find_applied",
+                 "station_click_km", "station_clicks_seen")
 nav = st.container(horizontal=True)
 
 if nav.button(":material/arrow_back: Back", type="secondary"):
@@ -1061,7 +1373,7 @@ if nav.button(":material/arrow_back: Back", type="secondary"):
         st.session_state["last_mode"] = current_mode
         st.session_state["mode"] = None
     else:
-        for key in ("spot", "clicked", "preset_applied"):
+        for key in ("spot", *LANDING_PICKS):
             st.session_state.pop(key, None)
     st.rerun()
 
@@ -1076,12 +1388,38 @@ if nav.button(
     st.rerun()
 
 if nav.button(":material/home: Start over", type="tertiary"):
-    for key in ("spot", "clicked", "mode", "preset_applied", "last_mode"):
+    for key in ("spot", "mode", "last_mode", *LANDING_PICKS):
         st.session_state.pop(key, None)
     st.rerun()
 
 
 # --- Stage 2: make sure this location has data ----------------------------
+
+if not dataset_path.exists() and STATION:
+    st.subheader(f"Download the record for {LOCATION_NAME}")
+    st.caption(
+        f"MeteoSwiss station {STATION} · {spot['height']:.0f} m · {LOCAL_TZ}. "
+        "Every hour the station has measured, from MeteoSwiss open data; "
+        "no account needed. It can take a minute or two."
+    )
+    if st.button("Fetch from MeteoSwiss", type="primary"):
+        bar = st.progress(0.0, text="Asking MeteoSwiss for the station's files...")
+
+        def report(done, total):
+            bar.progress(
+                done / total,
+                text=f"Downloaded {done} of {total} files" if done < total
+                else "All files in, joining them into one record...",
+            )
+
+        try:
+            fetch_station(spot, dataset_path, progress=report)
+            st.success("Downloaded.")
+            st.rerun()
+        except Exception as error:
+            bar.empty()
+            st.error(f"Could not fetch that station: {error}")
+    st.stop()
 
 if not dataset_path.exists():
     st.subheader(f"Download the record for {LOCATION_NAME}")
@@ -1156,7 +1494,7 @@ def kit_for(celsius):
     return WETSUIT[-1][1]
 
 
-def what_to_expect(rating, activity, session_text):
+def what_to_expect(rating, activity, session_text, missing_temp):
     """Turn the numbers into the sentences you would actually say out loud."""
     groove = rating["groove_pct"]
     low, high = ACTIVITIES[activity]["groove"]
@@ -1190,9 +1528,7 @@ def what_to_expect(rating, activity, session_text):
             f"to {warmth['warmest']:.0f}°C in {calendar.month_name[warmth['warmest_month']]}."
         )
     else:
-        lines.append(
-            "_No temperature in this download — refetch the location to include it._"
-        )
+        lines.append(f"_{missing_temp}_")
     return lines
 
 
@@ -1246,7 +1582,7 @@ def rate_location(path, mtime, zone, first_year, activity, windows):
     start_hour, end_hour, _ = best_window(knots)
 
     warmth = None
-    if "temp_c" in usable.columns:
+    if "temp_c" in usable.columns and usable["temp_c"].notna().any():
         temps = usable["temp_c"]
         monthly = temps.groupby(temps.index.month).mean().reindex(range(1, 13))
         on_groove_days = temps[temps.index.normalize().isin(
@@ -1300,9 +1636,13 @@ if st.session_state["mode"] is None:
         f"{abs(LONGITUDE):.2f}°{'E' if LONGITUDE >= 0 else 'W'}</b></span>"
         f"<span><b>{data_start.year}–{data_end.year}</b> of hourly readings</span>"
         f"<span>local time <b>{LOCAL_TZ}</b></span>"
-        "</div></div>"
+        + (
+            f"<span>MeteoSwiss station <b>{STATION}</b> · {spot['height']:.0f} m</span>"
+            if STATION else "<span>source <b>ERA5</b></span>"
+        )
+        + "</div></div>"
     )
-    locator_map(LATITUDE, LONGITUDE, key="start_map", height=300)
+    locator_map(LATITUDE, LONGITUDE, key="start_map", height=300, cell=not STATION)
 
     st.write("")
     st.session_state["activity"] = pick(
@@ -1468,6 +1808,13 @@ if st.session_state["mode"] == "compare":
         f"Judged for **{activity.lower()}** over {here['years']}, "
         f"counting {SESSION_TEXT} local at each spot."
     )
+    if bool(STATION) != bool(rival.get("station")):
+        st.caption(
+            ":material/info: One of these is a MeteoSwiss station and the other an "
+            "ERA5 cell. A station measures the wind where it stands; ERA5 averages "
+            "a 25 km cell, which smooths out local effects. Read the gap with that "
+            "in mind."
+        )
 
     # Scores side by side, the stronger one called out.
     for column, (name, verdict) in zip(st.columns(2), contenders):
@@ -1578,7 +1925,8 @@ if st.session_state["mode"] == "rating":
         + "</div>"
     )
     st.caption(
-        f"Scored on {rating['years']}, counting {SESSION_TEXT} local."
+        f"Scored on {rating['years']}, counting {SESSION_TEXT} local. "
+        f"Data: {SOURCE_CREDIT}."
     )
 
     expect_col, parts_col = st.columns([2, 3], gap="medium")
@@ -1586,7 +1934,11 @@ if st.session_state["mode"] == "rating":
     with expect_col:
         with st.container(border=True):
             st.markdown("##### :material/lightbulb: What to expect")
-            for line in what_to_expect(rating, activity, SESSION_TEXT):
+            missing_temp = (
+                "This station does not record air temperature." if STATION else
+                "No temperature in this download — refetch the location to include it."
+            )
+            for line in what_to_expect(rating, activity, SESSION_TEXT, missing_temp):
                 st.markdown(line)
 
     with parts_col:
@@ -1634,7 +1986,7 @@ if st.session_state["mode"] == "rating":
     st.divider()
     map_col, rose_col, note_col = st.columns([3, 2, 2])
     with map_col:
-        locator_map(LATITUDE, LONGITUDE, key="rating_map", height=340)
+        locator_map(LATITUDE, LONGITUDE, key="rating_map", height=340, cell=not STATION)
     with rose_col:
         st.pyplot(
             draw_rose(rating["direction"], rating["knots"], ACTIVITIES[activity]["ladder"], "knots"),
@@ -1721,7 +2073,7 @@ def prepare(hours):
 prepared = [(label, prepare(hours)) for label, hours in sessions]
 active = [(label, s) for label, s in prepared if not s.empty]
 
-st.caption(f"Showing **{period_label}** in {unit}")
+st.caption(f"Showing **{period_label}** in {unit} · data: {SOURCE_CREDIT}")
 
 
 # --- Plots ----------------------------------------------------------------
@@ -1823,7 +2175,8 @@ if windy_view:
                 st.pyplot(draw_rose(direction, speed, thresholds, unit), width="stretch")
                 # The rose says which way; the map says if that way is water.
                 locator_map(
-                    LATITUDE, LONGITUDE, key=f"rose_map_{selected_month}", height=210
+                    LATITUDE, LONGITUDE, key=f"rose_map_{selected_month}", height=210,
+                    cell=not STATION,
                 )
 
     st.caption(
@@ -1959,7 +2312,10 @@ with st.sidebar.expander("View data"):
         st.download_button(
             ":material/download: Download as CSV",
             combined.to_csv().encode(),
-            file_name=f"wind-{LATITUDE:+.2f}_{LONGITUDE:+.2f}.csv",
+            file_name=(
+                f"wind-{STATION}.csv" if STATION
+                else f"wind-{LATITUDE:+.2f}_{LONGITUDE:+.2f}.csv"
+            ),
             mime="text/csv",
         )
     else:

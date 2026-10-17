@@ -9,3 +9,4 @@ altair
 streamlit-folium
 folium
 timezonefinder
+requests
