@@ -341,7 +341,18 @@ PRESETS = {
     "Kiel": (54.50, 10.25),
 }
 
-SESSION_COLORS = ["tab:blue", "tab:orange"]
+# Top of the wind slider in explore, in knots.
+WIND_TOP = 50
+LOOKBACK = {"10 years": 10, "20 years": 20, "All": None}
+# Explore's charts. Brand orange and blue, each stepped to sit inside the
+# dark-mode lightness band and stay apart under colour blindness (checked
+# in OKLab against the app background).
+GOOD_COLOR = "#e37100"   # wind and air both right
+COLD_COLOR = "#2b8bc4"   # the wind is there, the warmth is not
+# One hue, near-ground to bright: how often, on a dark background.
+CHANCE_RAMP = ["#1f1710", "#4d2c0c", "#8a4a06", "#e37100", "#ffad5c"]
+WATER_SHADE = "#8b98a5"
+SURFACE = "#0a0e13"   # the app background, for gaps between marks
 
 THRESHOLD_COLORS = ["#8ecae6", "#ffb703", "#fb8500", "#9d0208"]
 
@@ -516,14 +527,6 @@ def fetch_station(spot, target, progress=None):
     dataset.to_netcdf(partial)
     partial.replace(target)
     return target
-
-
-def ladder_for(activity, unit):
-    """The four speed bands, converted to whatever unit is on screen."""
-    knots = ACTIVITIES[activity]["ladder"]
-    if unit == "knots":
-        return list(knots)
-    return [round(value / MS_TO_KNOTS * 2) / 2 for value in knots]
 
 
 def can_score(activity):
@@ -729,6 +732,21 @@ def reveal(text, delay=0.0, step=0.055, coloured=True):
 def pick(value, fallback):
     """segmented_control returns None when the user deselects; keep a value."""
     return fallback if value is None else value
+
+
+def sticky(key, default):
+    """A widget key whose value outlives the views that hide the widget.
+    Streamlit forgets a widget's state once it is not drawn, so the value is
+    copied aside every run and put back before the widget is drawn again."""
+    if key not in st.session_state:
+        st.session_state[key] = st.session_state.get(f"kept_{key}", default)
+    st.session_state[f"kept_{key}"] = st.session_state[key]
+    return key
+
+
+def percent(value):
+    """A share as people say it: a chance that is not quite zero is not 0%."""
+    return "<1%" if 0 < value < 0.5 else f"{value:.0f}%"
 
 
 def sessions_mask(index, windows):
@@ -1619,6 +1637,56 @@ def rate_location(path, mtime, zone, first_year, activity, windows):
     }
 
 
+def lasting_days(flags, length):
+    """Per day: do the flagged hours run unbroken for at least `length` hours?"""
+    stamps = flags.index.to_series()
+    # The local calendar day, taken from wall-clock time: normalising the
+    # zoned stamps fails where a clock change fell at midnight (Portugal 1976).
+    day = flags.index.tz_localize(None).normalize()
+    # A run breaks on a miss, a gap in the readings or a new day.
+    fresh = (
+        stamps.diff().ne(pd.Timedelta(hours=1))
+        | day.to_series(index=flags.index).diff().ne(pd.Timedelta(0))
+    )
+    run = (fresh | ~flags).cumsum()
+    streak = flags.groupby(run).transform("sum")
+    return streak.where(flags, 0).groupby(day).max().ge(length)
+
+
+@st.cache_data(show_spinner=False, max_entries=64)
+def condition_odds(path, mtime, zone, first_year, wind, air_min, lasting, hours):
+    """How often the conditions you want turn up: by day, month, year and
+    hour. A day counts when your hours on the water hold them for `lasting`
+    hours in a row. `air_min` None leaves the temperature out."""
+    frame = load_wind(path, mtime, zone)
+    frame = frame[frame.index.year >= first_year]
+    windy = (frame["speed"] * MS_TO_KNOTS).between(*wind)
+    good = windy if air_min is None else windy & (frame["temp_c"] >= air_min)
+    on_water = hour_mask(frame.index, hours)
+
+    days = pd.DataFrame({
+        "good": lasting_days(good[on_water], lasting),
+        "windy": lasting_days(windy[on_water], lasting),
+    })
+    when_on = frame[good & on_water]
+    return {
+        "days": days,
+        "month": days.groupby(days.index.month).mean().reindex(range(1, 13)) * 100,
+        "year": days["good"].groupby(
+            [days.index.year.rename("year"), days.index.month.rename("month")]
+        ).mean() * 100,
+        # Every hour of the day, not only yours, so you can see what you miss.
+        "hour": (
+            good.groupby([frame.index.month, frame.index.hour]).mean()
+            .unstack().reindex(index=range(1, 13), columns=range(24)) * 100
+        ),
+        "best_window": best_window(good.astype(float)),
+        "direction": wind_direction(when_on["u10"], when_on["v10"]).to_numpy(),
+        "knots": (when_on["speed"] * MS_TO_KNOTS).to_numpy(),
+        "on_month": when_on.index.month.to_numpy(),
+    }
+
+
 if "mode" not in st.session_state:
     st.session_state["mode"] = None
 
@@ -1672,8 +1740,8 @@ if st.session_state["mode"] is None:
     cards = [
         (
             ":material/insights: Explore the data",
-            "Windy days per month, sessions by hour, year-on-year trends and "
-            "wind direction.",
+            "Your chances of the wind and warmth you want, by month, by hour "
+            "of the day and year by year.",
             "Start exploring",
             "explore",
         ),
@@ -1710,47 +1778,64 @@ if st.session_state["mode"] is None:
 
 # --- Settings ------------------------------------------------------------
 # Below the start screen on purpose: the sidebar only appears once you are
-# inside a view, and then it carries everything that changes what you see.
+# inside a view, and then it carries everything that changes what you see,
+# in the order you would decide it: what you sail, what you want, when.
 # Shared by every view, so the rating cannot quietly score different hours
-# than the ones you picked.
+# than the ones you picked. sticky() keeps a choice while another view hides
+# its widget.
+
+EXPLORING = st.session_state["mode"] == "explore"
+HAS_TEMP = "temp_c" in df.columns and bool(df["temp_c"].notna().any())
 
 st.sidebar.header("Settings")
+if EXPLORING:
+    st.sidebar.subheader("Your conditions")
 
 activity = st.sidebar.selectbox(
-    "What you are sailing", list(ACTIVITIES),
+    "What you sail", list(ACTIVITIES),
     index=list(ACTIVITIES).index(st.session_state["activity"]),
     key="activity_side",
 )
 st.session_state["activity"] = activity
 groove_low, groove_high = ACTIVITIES[activity]["groove"]
-st.sidebar.caption(f"Sailable wind {groove_low}–{groove_high} kt")
 
-unit = pick(
-    st.sidebar.segmented_control("Units", ["knots", "m/s"], default="knots", key="unit"), "knots"
+if EXPLORING:
+    # One range per sport, so switching sport brings back its own wind.
+    wind_low, wind_high = st.sidebar.slider(
+        "Wind", 0, WIND_TOP, format="%d kn",
+        key=sticky(f"wind_{activity}", ACTIVITIES[activity]["groove"]),
+    )
+    air_pick = st.sidebar.select_slider(
+        "Air at least", ["Any", *range(10, 36)],
+        format_func=lambda value: "any" if value == "Any" else f"{value} °C",
+        key=sticky("air_min", "Any"), disabled=not HAS_TEMP,
+    )
+    if not HAS_TEMP:
+        st.sidebar.caption(
+            "This station does not record air temperature." if STATION else
+            "No temperature in this download; refetch the spot to include it."
+        )
+    air_min = air_pick if HAS_TEMP and air_pick != "Any" else None
+    lasting = st.sidebar.segmented_control(
+        "Lasting at least", [1, 2, 3], format_func=lambda h: f"{h} h",
+        required=True, key=sticky("lasting", 2),
+    )
+else:
+    st.sidebar.caption(f"Sailable wind {groove_low}–{groove_high} kt")
+
+if EXPLORING:
+    st.sidebar.subheader("When")
+hours = st.sidebar.slider(
+    "On the water", 0, 23, format="%d:00", key=sticky("hours", (10, 17)),
 )
-factor = MS_TO_KNOTS if unit == "knots" else 1.0
+SESSION_WINDOWS = (hours,)
+SESSION_TEXT = "all day" if hours == (0, 23) else f"{hours[0]:02d}:00–{hours[1]:02d}:59"
+st.sidebar.caption("Every hour of the day" if hours == (0, 23) else f"{SESSION_TEXT} local time")
 
-sessions = []
-with st.sidebar.expander("When you sail", expanded=False):
-    st.caption("Only count the hours you are actually on the water.")
-    split_sessions = st.checkbox("Filter by sailing session", value=True)
-    if split_sessions:
-        morning = st.slider("Session 1", 0, 23, (8, 11), format="%d:00")
-        sessions.append((f"Session 1 · {morning[0]:02d}:00–{morning[1]:02d}:00", morning))
-        if st.checkbox("Second session", value=True):
-            afternoon = st.slider("Session 2", 0, 23, (14, 17), format="%d:00")
-            sessions.append(
-                (f"Session 2 · {afternoon[0]:02d}:00–{afternoon[1]:02d}:00", afternoon)
-            )
-    else:
-        sessions.append(("All hours", None))
-st.sidebar.caption(" · ".join(label.split("· ")[-1] for label, _ in sessions))
-
-SESSION_WINDOWS = tuple(hours for _, hours in sessions)
-SESSION_TEXT = " and ".join(
-    "all day" if hours is None else f"{hours[0]:02d}:00–{hours[1]:02d}:59"
-    for hours in SESSION_WINDOWS
-)
+if EXPLORING:
+    span = st.sidebar.segmented_control(
+        "Years", list(LOOKBACK), required=True, key=sticky("years", "20 years"),
+    )
 
 # Forward, or switching sport in the sidebar, can land here with a range
 # that has nothing to score.
@@ -2006,317 +2091,254 @@ if st.session_state["mode"] == "rating":
     st.stop()
 
 
-# --- What period to show (sidebar, alongside the other controls) ----------
+# --- Explore: your chances of the conditions you want ---------------------
 
-st.sidebar.subheader("What to look at")
-
-view = st.sidebar.radio(
-    "View",
-    ["Windy days per month", "Month across years"],
-    key="view",
+years_back = LOOKBACK[span]
+first_year = (
+    data_start.year if years_back is None
+    else max(data_start.year, data_end.year - years_back + 1)
 )
-windy_view = view == "Windy days per month"
-
-lookback_options = {"5 years": 5, "10 years": 10, "15 years": 15, "20 years": 20, "All": None}
-
-if windy_view:
-    lookback_label = st.sidebar.selectbox(
-        "Compare over", list(lookback_options),
-        index=list(lookback_options).index("All"), key="windy_lookback",
+with st.spinner("Counting your days..."):
+    odds = condition_odds(
+        dataset_path, dataset_path.stat().st_mtime, LOCAL_TZ, first_year,
+        (wind_low, wind_high), air_min, lasting, hours,
     )
-    lookback = lookback_options[lookback_label]
-    day_rule = st.sidebar.radio(
-        "A day counts when the wind",
-        ["averages the speed", "reaches the speed"],
-        key="day_rule",
-    )
-    how = "max" if day_rule == "reaches the speed" else "mean"
+by_month, days = odds["month"], odds["days"]
 
-    first_year = data_start.year if lookback is None else data_end.year - lookback + 1
-    first_year = max(first_year, data_start.year)
-    window = df[df.index.year >= first_year]
-    period_label = f"all months, {first_year}–{data_end.year}"
-else:
-    month = st.sidebar.selectbox(
-        "Month", list(range(1, 13)),
-        index=data_end.month - 1,
-        format_func=lambda m: calendar.month_name[m],
-        key="month",
-    )
-    lookback_label = st.sidebar.selectbox(
-        "Compare over", list(lookback_options),
-        index=list(lookback_options).index("10 years"), key="lookback",
-    )
-    lookback = lookback_options[lookback_label]
+wind_text = (
+    f"{wind_low}+ kn" if wind_high >= WIND_TOP else
+    f"up to {wind_high} kn" if wind_low == 0 else
+    f"{wind_low}–{wind_high} kn"
+)
+wanted = wind_text + ("" if air_min is None else f" and {air_min} °C+")
+within = (
+    "at any hour" if hours == (0, 23)
+    else f"between {hours[0]:02d}:00 and {hours[1]:02d}:59"
+)
 
-    first_year = data_start.year if lookback is None else data_end.year - lookback + 1
-    first_year = max(first_year, data_start.year)
-    window = df[(df.index.month == month) & (df.index.year >= first_year)]
-    period_label = f"{calendar.month_name[month]} {first_year}–{data_end.year}"
+st.html(
+    '<div class="reveal" style="font-size:1.5rem;font-weight:650">'
+    + reveal(f"How often you get {wanted}")
+    + '</div><hr class="accent-rule">'
+)
+st.caption(
+    f"A day counts when that lasts {lasting} h in a row {within} local time · "
+    f"{first_year}–{data_end.year} · data: {SOURCE_CREDIT}"
+)
 
-if window.empty:
-    st.warning("No data in the selected period.")
+overall = float(days["good"].mean() * 100) if len(days) else 0.0
+if overall == 0:
+    st.info(
+        f"Not a single day like that between {first_year} and {data_end.year}. "
+        "Try less wind, cooler air, a shorter stretch or more hours on the water."
+    )
     st.stop()
 
+month_names = [calendar.month_abbr[m] for m in range(1, 13)]
+month_days = [calendar.monthrange(2001, m)[1] for m in range(1, 13)]
+best_month = int(by_month["good"].idxmax())
+best_pct = float(by_month.loc[best_month, "good"])
+best_days = round(best_pct / 100 * month_days[best_month - 1])
+best_days_text = (
+    "under a day" if best_days < 1 else f"about {best_days} day{'s' if best_days > 1 else ''}"
+)
+start_hour, end_hour, _ = odds["best_window"]
 
-# --- Build one series per session -----------------------------------------
+kpis = st.columns(4)
+kpis[0].metric(
+    "Any day of the year", percent(overall), border=True,
+    icon=":material/event_available:",
+    help=f"Share of all days {first_year}–{data_end.year} that give you this",
+)
+kpis[1].metric(
+    "Best month", calendar.month_name[best_month], border=True,
+    icon=":material/trending_up:", delta_arrow="off", delta_color="off",
+    delta=f"{percent(best_pct)} · {best_days_text}",
+)
+kpis[2].metric(
+    "Best time of day", f"{start_hour:02d}:00–{end_hour:02d}:59", border=True,
+    icon=":material/schedule:", help="The three hours that most often have it, all year",
+)
+kpis[3].metric(
+    "Wind comes from", prevailing_direction(odds["direction"]), border=True,
+    icon=":material/explore:", help="When it is on, during your hours",
+)
 
+# Month by month. With a temperature set, the blue cap shows the days that
+# bring the wind but not the warmth.
+GOOD_LABEL, COLD_LABEL = "Wind and warm air", "Wind, but colder"
+month_data = pd.DataFrame({
+    "month": range(1, 13),
+    "name": month_names,
+    "good": by_month["good"].fillna(0).to_numpy(),
+    "windy": by_month["windy"].fillna(0).to_numpy(),
+})
+month_data["days"] = month_data["good"] / 100 * month_days
+month_tooltip = [
+    alt.Tooltip("name:N", title="month"),
+    alt.Tooltip("good:Q", title="% of days with it", format=".0f"),
+    alt.Tooltip("days:Q", title="days in a typical month", format=".1f"),
+]
+if air_min is not None:
+    month_tooltip.insert(2, alt.Tooltip("windy:Q", title="% with the wind alone", format=".0f"))
 
-def prepare(hours):
-    """Daily means over the session hours, in the chosen unit."""
-    sub = window[hour_mask(window.index, hours)]
-    if sub.empty:
-        return sub
-    return sub["speed"].resample("1D").mean().dropna().to_frame() * factor
-
-
-prepared = [(label, prepare(hours)) for label, hours in sessions]
-active = [(label, s) for label, s in prepared if not s.empty]
-
-st.caption(f"Showing **{period_label}** in {unit} · data: {SOURCE_CREDIT}")
-
-
-# --- Plots ----------------------------------------------------------------
-
-if windy_view:
-    st.html(
-        '<div class="reveal" style="font-size:1.5rem;font-weight:650">'
-        + reveal("Windy days per month")
-        + '</div><hr class="accent-rule">'
+# Defaults to the best month; a click anywhere in a column picks another.
+pick_month = alt.selection_point(
+    name="month_click", fields=["month"], on="click", value=[{"month": best_month}],
+)
+x_month = alt.X("name:N", sort=month_names, title=None, axis=alt.Axis(labelAngle=0))
+bar_style = dict(size=22, cornerRadiusTopLeft=4, cornerRadiusTopRight=4)
+# The picked month gets a soft band behind it rather than dimming the rest,
+# so every bar keeps its true colour.
+layers = [
+    alt.Chart(month_data)
+    .mark_bar(size=44, color=WATER_SHADE)
+    .encode(x=x_month, y=alt.value(0), y2=alt.value(alt.expr("height")),
+            opacity=alt.condition(pick_month, alt.value(0.14), alt.value(0.0)))
+]
+if air_min is not None:
+    series = alt.Scale(domain=[GOOD_LABEL, COLD_LABEL], range=[GOOD_COLOR, COLD_COLOR])
+    layers.append(
+        alt.Chart(month_data.assign(series=COLD_LABEL))
+        .mark_bar(**bar_style)
+        .encode(x=x_month, y=alt.Y("windy:Q", title="% of days"),
+                color=alt.Color("series:N", scale=series, title=None,
+                                legend=alt.Legend(orient="top")))
     )
-
-    thresholds = ladder_for(activity, unit)
-    # The hours from "When you sail" drive the month chart and the rose.
-    sub = window[sessions_mask(window.index, SESSION_WINDOWS)]
-    if sub.empty:
-        st.warning("No data for the selected hours.")
-        st.stop()
-
-    daily = getattr(sub.resample("1D")["speed"], how)().dropna() * factor
-    table = pd.DataFrame(
-        {
-            threshold: (daily > threshold).groupby(daily.index.month).mean().reindex(range(1, 13))
-            * 100
-            for threshold in thresholds
-        }
-    )
-
-    chart_col, rose_col = st.columns([3, 2], gap="medium")
-
-    with chart_col:
-        month_names = [calendar.month_abbr[m] for m in range(1, 13)]
-        records = [
-            {
-                "month": m,
-                "name": calendar.month_abbr[m],
-                "band": f"> {threshold:g}",
-                "pct": 0.0 if pd.isna(table.loc[m, threshold]) else float(table.loc[m, threshold]),
-            }
-            for m in range(1, 13)
-            for threshold in thresholds
-        ]
-        chart_data = pd.DataFrame(records)
-
-        click = alt.selection_point(name="month_click", fields=["month"], on="click")
-        layers = []
-        for threshold, color in zip(thresholds, THRESHOLD_COLORS):
-            layers.append(
-                alt.Chart(chart_data[chart_data["band"] == f"> {threshold:g}"])
-                .mark_bar(height=13, cornerRadius=2)
-                .encode(
-                    y=alt.Y("name:N", sort=month_names, title=None),
-                    x=alt.X(
-                        "pct:Q",
-                        scale=alt.Scale(domain=[0, 100]),
-                        title="% of days",
-                        axis=alt.Axis(values=[0, 25, 50, 75, 100], format="d"),
-                    ),
-                    color=alt.value(color),
-                    opacity=alt.condition(click, alt.value(1.0), alt.value(0.35)),
-                    tooltip=[
-                        alt.Tooltip("name:N", title="month"),
-                        alt.Tooltip("band:N", title=f"over ({unit})"),
-                        alt.Tooltip("pct:Q", title="% of days", format=".0f"),
-                    ],
-                )
-            )
-        # Invisible full-width bar on top: gives every row a click target even
-        # where the coloured bars stop short.
-        layers.append(
-            alt.Chart(chart_data[chart_data["band"] == f"> {thresholds[0]:g}"])
-            .mark_bar(height=13, opacity=0)
-            .encode(y=alt.Y("name:N", sort=month_names, title=None), x=alt.value(alt.expr("width")))
-            .add_params(click)
-        )
-        chart = alt.layer(*layers).properties(height=560)
-        event = st.altair_chart(chart, width="stretch", on_select="rerun", key="windy_pick")
-
-        selected_rows = (event.selection or {}).get("month_click") or []
-        selected_month = selected_rows[0]["month"] if selected_rows else data_end.month
-        st.caption("Click a month to see where its wind comes from →")
-
-    with rose_col:
-        rose_source = sub[sub.index.month == selected_month]
-
-        if rose_source.empty:
-            st.info("No readings for that month.")
-        else:
-            direction = wind_direction(rose_source["u10"], rose_source["v10"])
-            speed = rose_source["speed"] * factor
-            knots = rose_source["speed"] * MS_TO_KNOTS
-            start, end, strength = best_window(knots)
-            with st.container(border=True):
-                st.markdown(
-                    f"**{calendar.month_name[selected_month]}** · from "
-                    f"**{prevailing_direction(direction)}** · "
-                    f"{speed.mean():.1f} {unit} average · windiest "
-                    f"**{start:02d}–{end:02d}h** at {strength:.0f} kt"
-                )
-                st.pyplot(draw_rose(direction, speed, thresholds, unit), width="stretch")
-                # The rose says which way; the map says if that way is water.
-                locator_map(
-                    LATITUDE, LONGITUDE, key=f"rose_map_{selected_month}", height=210,
-                    cell=not STATION,
-                )
-
-    st.caption(
-        f"Share of days in {period_label} where the wind "
-        f"{'reached' if how == 'max' else 'averaged above'} each speed, "
-        f"counting {SESSION_TEXT} (local time)."
-    )
+    good_color = alt.Color("series:N", scale=series, title=None)
 else:
-    st.subheader(f"{calendar.month_name[month]} compared across years")
-    style = st.sidebar.radio(
-        "Show as",
-        ["Year by year", "Calendar", "Time of day"],
-        key="chart_style",
+    good_color = alt.value(GOOD_COLOR)
+layers.append(
+    alt.Chart(month_data.assign(series=GOOD_LABEL))
+    # The surface-coloured ring keeps the orange apart from the blue behind it.
+    .mark_bar(**bar_style, stroke=SURFACE, strokeWidth=2)
+    .encode(x=x_month, y=alt.Y("good:Q", title="% of days"), color=good_color)
+)
+# Invisible full-height columns on top: the click and hover target, so a
+# month is easy to hit even where its bar is short.
+layers.append(
+    alt.Chart(month_data)
+    .mark_bar(size=44, opacity=0)
+    .encode(x=x_month, y=alt.value(0), y2=alt.value(alt.expr("height")),
+            tooltip=month_tooltip)
+    .add_params(pick_month)
+)
+
+chart_col, hour_col = st.columns([3, 2], gap="medium")
+with chart_col:
+    st.markdown("**Month by month**")
+    event = st.altair_chart(
+        alt.layer(*layers).properties(height=300), width="stretch",
+        on_select="rerun", key="month_pick",
     )
+    clicked = (event.selection or {}).get("month_click") or []
+    selected = clicked[0]["month"] if clicked else best_month
+    st.caption("Click a month to see its day and its wind →")
 
-    years = sorted({y for _, s in active for y in set(s.index.year)})
-
-    if style == "Year by year":
-        # A line per session: differences between years read far more clearly
-        # than bars, and the shaded band shows the normal spread.
-        fig, ax = plt.subplots(figsize=(12, 4.5))
-        for (label, series), color in zip(active, SESSION_COLORS):
-            grouped = series.groupby(series.index.year)["speed"]
-            means = grouped.mean().reindex(years)
-            spread = grouped.std().reindex(years)
-            ax.fill_between(
-                years, means - spread, means + spread, color=color, alpha=0.12, linewidth=0
+with hour_col:
+    st.markdown(f"**{calendar.month_name[selected]} through the day**")
+    hour_data = pd.DataFrame({
+        "mid": np.arange(24) + 0.5,
+        "label": [f"{h:02d}:00–{h:02d}:59" for h in range(24)],
+        "pct": odds["hour"].loc[selected].fillna(0).to_numpy(),
+    })
+    x_hour = alt.X(
+        "mid:Q", scale=alt.Scale(domain=[0, 24]), title=None,
+        axis=alt.Axis(values=list(range(0, 25, 3)), labelExpr="datum.value + 'h'"),
+    )
+    hover = alt.selection_point(
+        on="pointerover", nearest=True, fields=["mid"], empty=False, clear="pointerout",
+    )
+    line = alt.Chart(hour_data).encode(x=x_hour, y=alt.Y("pct:Q", title="% of hours"))
+    st.altair_chart(
+        alt.layer(
+            alt.Chart(pd.DataFrame({"start": [hours[0]], "end": [hours[1] + 1]}))
+            .mark_rect(color=WATER_SHADE, opacity=0.14)
+            .encode(x="start:Q", x2="end:Q"),
+            line.mark_area(color=GOOD_COLOR, opacity=0.1, interpolate="monotone"),
+            line.mark_line(color=GOOD_COLOR, strokeWidth=2, interpolate="monotone"),
+            alt.Chart(hour_data).mark_rule(color=WATER_SHADE).encode(x=x_hour)
+            .transform_filter(hover),
+            line.mark_point(filled=True, size=80, color=GOOD_COLOR,
+                            stroke=SURFACE, strokeWidth=2)
+            .encode(
+                opacity=alt.condition(hover, alt.value(1.0), alt.value(0.0)),
+                tooltip=[alt.Tooltip("label:N", title="hour"),
+                         alt.Tooltip("pct:Q", title="% of hours with it", format=".0f")],
             )
-            ax.plot(years, means, color=color, marker="o", ms=4, lw=1.6, label=label)
-            ax.axhline(means.mean(), color=color, ls="--", lw=0.9, alpha=0.7)
-        ax.set_ylabel(unit)
-        ax.set_xticks(years)
-        ax.set_xticklabels(years, rotation=90 if len(years) > 20 else 0, fontsize=8)
-        ax.grid(True, alpha=0.3)
-        ax.legend(loc="best", fontsize="small")
-        ax.set_title("Line: average for the month · shaded: typical spread · dashed: long-run normal")
+            .add_params(hover),
+        ).properties(height=300),
+        width="stretch",
+    )
+    st.caption("Share of each hour that has it. Shaded: your hours on the water.")
 
-    elif style == "Calendar":
-        # Every day of the month, one row per year — good for spotting whether
-        # windy spells cluster early or late in the month.
-        fig, axes = plt.subplots(
-            len(active), 1, figsize=(12, 2.2 + 2.4 * len(active)), squeeze=False
+st.divider()
+year_col, rose_col = st.columns([3, 2], gap="medium")
+
+with year_col:
+    st.markdown("**Year by year**")
+    year_data = odds["year"].rename("pct").reset_index()
+    year_data["name"] = [calendar.month_abbr[m] for m in year_data["month"]]
+    years_shown = year_data["year"].nunique()
+    st.altair_chart(
+        alt.Chart(year_data)
+        .mark_rect(stroke=SURFACE, strokeWidth=2 if years_shown <= 30 else 1)
+        .encode(
+            x=alt.X("name:N", sort=month_names, title=None,
+                    axis=alt.Axis(labelAngle=0, orient="top")),
+            y=alt.Y("year:O", sort="descending", title=None,
+                    axis=alt.Axis(labelOverlap="greedy")),
+            color=alt.Color(
+                "pct:Q", title="% of days",
+                scale=alt.Scale(range=CHANCE_RAMP, domain=[0, max(1.0, year_data["pct"].max())]),
+                legend=alt.Legend(orient="bottom", gradientLength=220),
+            ),
+            tooltip=[alt.Tooltip("year:O"), alt.Tooltip("name:N", title="month"),
+                     alt.Tooltip("pct:Q", title="% of days with it", format=".0f")],
         )
-        for ax, ((label, series), color) in zip(axes.ravel(), zip(active, SESSION_COLORS)):
-            frame = pd.DataFrame(
-                {
-                    "year": series.index.year,
-                    "day": series.index.day,
-                    "speed": series["speed"].values,
-                }
-            )
-            grid = frame.pivot_table(index="year", columns="day", values="speed", aggfunc="mean")
-            grid = grid.reindex(index=years, columns=range(1, 32))
-            mesh = ax.imshow(grid.values, aspect="auto", cmap="viridis", interpolation="nearest")
-            ax.set_yticks(range(len(years)))
-            ax.set_yticklabels(years, fontsize=7)
-            ax.set_xticks(range(0, 31, 2))
-            ax.set_xticklabels(range(1, 32, 2), fontsize=7)
-            ax.set_xlabel("day of month")
-            ax.set_title(label, fontsize=10)
-            fig.colorbar(mesh, ax=ax, label=unit, pad=0.01)
+        .properties(height=min(max(16 * years_shown, 180), 520)),
+        width="stretch",
+    )
+    st.caption("One square per month of each year: the brighter, the more days had it.")
 
-    else:  # Time of day
-        # Which hours actually blow, averaged over every year in the window.
-        fig, ax = plt.subplots(figsize=(12, 4.5))
-        hourly = window["speed"] * factor
-        by_hour = hourly.groupby(hourly.index.hour)
-        mean_by_hour = by_hour.mean()
-        ax.fill_between(
-            mean_by_hour.index,
-            by_hour.quantile(0.25),
-            by_hour.quantile(0.75),
-            color="tab:green",
-            alpha=0.15,
-            linewidth=0,
-            label="middle half of readings",
+with rose_col:
+    in_month = odds["on_month"] == selected
+    if in_month.any():
+        st.markdown(
+            f"**{calendar.month_name[selected]}** · when it is on, the wind comes "
+            f"from **{prevailing_direction(odds['direction'][in_month])}**"
         )
-        ax.plot(mean_by_hour.index, mean_by_hour, color="tab:green", marker="o", ms=4, lw=1.6,
-                label="average")
-        for (label, hours), color in zip(sessions, SESSION_COLORS):
-            if hours is None:
-                continue
-            ax.axvspan(hours[0], hours[1], color=color, alpha=0.15, label=label)
-        # The sport's range is set in knots; shade it in the unit on screen.
-        to_unit = factor / MS_TO_KNOTS
-        ax.axhspan(groove_low * to_unit, groove_high * to_unit, color="grey", alpha=0.08,
-                   label=f"{activity} range")
-        ax.set_xticks(range(0, 24))
-        ax.set_xticklabels([f"{h:02d}" for h in range(24)], fontsize=8)
-        ax.set_xlabel(f"hour of day ({LOCAL_TZ})")
-        ax.set_ylabel(unit)
-        ax.grid(True, alpha=0.3)
-        ax.legend(loc="best", fontsize="small")
-        ax.set_title(f"Typical day in {calendar.month_name[month]}, averaged over {len(years)} years")
-
-    style_figure(fig, *fig.axes)
-    plt.tight_layout()
-    st.pyplot(fig, width="stretch")
+        st.pyplot(
+            draw_rose(odds["direction"][in_month], odds["knots"][in_month],
+                      ACTIVITIES[activity]["ladder"], "knots"),
+            width="stretch",
+        )
+    else:
+        st.info(f"No hours like that in {calendar.month_name[selected]}.")
+    # The rose says which way; the map says if that way is water.
+    locator_map(LATITUDE, LONGITUDE, key="explore_map", height=210, cell=not STATION)
 
 
 # --- The numbers behind the charts (sidebar) ------------------------------
 # Kept out of the main page so the charts end cleanly.
 
-st.sidebar.subheader("Data")
-if windy_view:
-    with st.sidebar.expander("Exact percentages"):
-        st.dataframe(
-            table.set_axis([calendar.month_abbr[m] for m in range(1, 13)])
-            .set_axis([f"> {threshold:g}" for threshold in thresholds], axis=1)
-            .round(0),
-            width="stretch",
-        )
-else:
-    with st.sidebar.expander("Year-by-year numbers"):
-        summaries = {}
-        for label, series in active:
-            grouped = series.groupby(series.index.year)["speed"]
-            summaries[label] = pd.DataFrame(
-                {"mean": grouped.mean(), "max": grouped.max(), "points": grouped.size()}
-            )
-        if summaries:
-            st.dataframe(pd.concat(summaries, axis=1).round(1), width="stretch")
-
-with st.sidebar.expander("View data"):
-    tables = []
-    for label, series in active:
-        table = series.copy()
-        table.insert(0, "session", label)
-        tables.append(table)
-    if tables:
-        combined = pd.concat(tables).sort_index().round(2)
-        st.dataframe(combined, width="stretch")
-        st.download_button(
-            ":material/download: Download as CSV",
-            combined.to_csv().encode(),
-            file_name=(
-                f"wind-{STATION}.csv" if STATION
-                else f"wind-{LATITUDE:+.2f}_{LONGITUDE:+.2f}.csv"
-            ),
-            mime="text/csv",
-        )
-    else:
-        st.write("No readings in your sailing hours for this period.")
+with st.sidebar.expander("The numbers"):
+    table = pd.DataFrame({
+        "Month": month_names,
+        "With it %": month_data["good"].round(0),
+        "Days": month_data["days"].round(1),
+    })
+    if air_min is not None:
+        table.insert(2, "Wind alone %", month_data["windy"].round(0))
+    st.dataframe(table, hide_index=True, width="stretch")
+    per_day = days.rename(columns={"good": "with_it", "windy": "wind_alone"})
+    per_day.index = per_day.index.date
+    st.download_button(
+        ":material/download: Every day as CSV",
+        per_day.rename_axis("date").to_csv().encode(),
+        file_name=(
+            f"days-{STATION}.csv" if STATION
+            else f"days-{LATITUDE:+.2f}_{LONGITUDE:+.2f}.csv"
+        ),
+        mime="text/csv",
+    )
