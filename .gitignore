@@ -1,0 +1,13 @@
+# Secrets: never commit real credentials
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Download scratch
+data/download_*.zip
+*.log
+
+# Half-written station downloads
+data/*.part
