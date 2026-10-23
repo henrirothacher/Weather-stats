@@ -26,7 +26,7 @@ st.set_page_config(
 )
 
 # Goes up by 0.1 with every commit pushed to GitHub (2.9 -> 3.0).
-APP_VERSION = "2.2"
+APP_VERSION = "2.3"
 
 st.html(
     """
@@ -349,6 +349,7 @@ LOOKBACK = {"10 years": 10, "20 years": 20, "All": None}
 # in OKLab against the app background).
 GOOD_COLOR = "#e37100"   # wind and air both right
 COLD_COLOR = "#2b8bc4"   # the wind is there, the warmth is not
+MISS_COLOR = "#26333f"   # a day that did not have it: there, but quiet
 # One hue, near-ground to bright: how often, on a dark background.
 CHANCE_RAMP = ["#1f1710", "#4d2c0c", "#8a4a06", "#e37100", "#ffad5c"]
 WATER_SHADE = "#8b98a5"
@@ -757,6 +758,80 @@ def sessions_mask(index, windows):
     for window in windows:
         combined |= hour_mask(index, window)
     return combined
+
+
+# A window of dates is ((month, day), (month, day)) and holds in every year:
+# 1–15 June is ((6, 1), (6, 15)). None is the whole year.
+
+def in_dates(index, dates):
+    """True on the calendar days inside the window, whatever the year. One
+    that runs past New Year, 20 Dec to 10 Jan, wraps round."""
+    if dates is None:
+        return np.ones(len(index), dtype=bool)
+    stamp = np.asarray(index.month * 100 + index.day)
+    start, end = (month * 100 + day for month, day in dates)
+    if start <= end:
+        return (stamp >= start) & (stamp <= end)
+    return (stamp >= start) | (stamp <= end)
+
+
+def window_year(index, dates):
+    """The year each day's window opened in, so 20 Dec – 10 Jan is one window."""
+    years = np.asarray(index.year)
+    if dates is None or dates[0] <= dates[1]:
+        return years
+    return years - (np.asarray(index.month * 100 + index.day) < dates[0][0] * 100 + dates[0][1])
+
+
+def window_days(dates):
+    """Every calendar day of the window in order, as (month, day). 29 Feb is
+    left out: it comes round one year in four, too seldom to chart."""
+    common = pd.date_range("2001-01-01", "2001-12-31")
+    pairs = [(int(month), int(day)) for month, day in zip(common.month, common.day)]
+    start, end = pairs.index(dates[0]), pairs.index(dates[1])
+    return pairs[start:end + 1] if start <= end else pairs[start:] + pairs[:end + 1]
+
+
+def axis_dates(months, days_of_month, dates):
+    """Where each calendar day sits on the window's time axis: in 2001, or in
+    2002 once the window has run past New Year. 29 Feb must be out already."""
+    months, days_of_month = np.asarray(months), np.asarray(days_of_month)
+    wrapped = (months * 100 + days_of_month < dates[0][0] * 100 + dates[0][1]) & (dates[0] > dates[1])
+    return pd.to_datetime(
+        pd.DataFrame({"year": 2001 + wrapped, "month": months, "day": days_of_month})
+    )
+
+
+def dates_label(dates):
+    """1–15 June, or 28 May – 10 June across a month end."""
+    (first_month, first_day), (last_month, last_day) = dates
+    first, last = calendar.month_name[first_month], calendar.month_name[last_month]
+    if dates[0] == dates[1]:
+        return f"{first_day} {first}"
+    if first_month == last_month and first_day < last_day:
+        return f"{first_day}–{last_day} {first}"
+    return f"{first_day} {first} – {last_day} {last}"
+
+
+def as_dates(picked):
+    """The range from the date picker as a window, or None for a year or more.
+    With only the first end picked so far, that one day is the window."""
+    if not picked:
+        return None
+    start, end = picked[0], picked[-1]
+    if (end - start).days >= 365:
+        return None
+    # Not every year has a 29 Feb; the 28th stands in for it.
+    return tuple(
+        (2, 28) if (day.month, day.day) == (2, 29) else (day.month, day.day)
+        for day in (start, end)
+    )
+
+
+def lookback_start(frame, years_back):
+    """First year of the last `years_back` years on record; None for all of them."""
+    first, last = frame.index.min().year, frame.index.max().year
+    return first if years_back is None else max(first, last - years_back + 1)
 
 
 def wind_direction(u, v):
@@ -1653,15 +1728,25 @@ def lasting_days(flags, length):
     return streak.where(flags, 0).groupby(day).max().ge(length)
 
 
-@st.cache_data(show_spinner=False, max_entries=64)
-def condition_odds(path, mtime, zone, first_year, wind, air_min, lasting, hours):
-    """How often the conditions you want turn up: by day, month, year and
-    hour. A day counts when your hours on the water hold them for `lasting`
-    hours in a row. `air_min` None leaves the temperature out."""
-    frame = load_wind(path, mtime, zone)
-    frame = frame[frame.index.year >= first_year]
+def flag_hours(frame, first_year, wind, air_min, dates):
+    """The record from `first_year` on, cut to your dates, with each hour
+    flagged twice: is the wind right, and is the air warm enough as well.
+    A window over New Year starts with the first one to open in `first_year`,
+    so none is counted with only its January half."""
+    opened = window_year(frame.index, dates)
+    frame = frame[(opened >= first_year) & in_dates(frame.index, dates)]
     windy = (frame["speed"] * MS_TO_KNOTS).between(*wind)
     good = windy if air_min is None else windy & (frame["temp_c"] >= air_min)
+    return frame, windy, good
+
+
+@st.cache_data(show_spinner=False, max_entries=64)
+def condition_odds(path, mtime, zone, first_year, wind, air_min, lasting, hours, dates):
+    """How often the conditions you want turn up on your dates (None for the
+    whole year): by day, month, year and hour. A day counts when your hours
+    on the water hold them for `lasting` hours in a row. `air_min` None
+    leaves the temperature out."""
+    frame, windy, good = flag_hours(load_wind(path, mtime, zone), first_year, wind, air_min, dates)
     on_water = hour_mask(frame.index, hours)
 
     days = pd.DataFrame({
@@ -1680,10 +1765,30 @@ def condition_odds(path, mtime, zone, first_year, wind, air_min, lasting, hours)
             good.groupby([frame.index.month, frame.index.hour]).mean()
             .unstack().reindex(index=range(1, 13), columns=range(24)) * 100
         ),
+        # The same across all your dates at once.
+        "dates_hour": good.groupby(frame.index.hour).mean().reindex(range(24)) * 100,
         "best_window": best_window(good.astype(float)),
         "direction": wind_direction(when_on["u10"], when_on["v10"]).to_numpy(),
         "knots": (when_on["speed"] * MS_TO_KNOTS).to_numpy(),
         "on_month": when_on.index.month.to_numpy(),
+    }
+
+
+@st.cache_data(show_spinner=False, max_entries=256)
+def spot_chance(path, mtime, zone, years_back, wind, air_min, lasting, hours, dates):
+    """One spot's share of days with your conditions, over its own last
+    `years_back` years, for ranking spots side by side. None when the air
+    temperature is asked for and the spot has none on record."""
+    frame = load_wind(path, mtime, zone)
+    if air_min is not None and not ("temp_c" in frame and frame["temp_c"].notna().any()):
+        return None
+    frame, _, good = flag_hours(frame, lookback_start(frame, years_back), wind, air_min, dates)
+    days = lasting_days(good[hour_mask(frame.index, hours)], lasting)
+    if days.empty:
+        return {"pct": 0.0, "years": "no days on record"}
+    return {
+        "pct": float(days.mean() * 100),
+        "years": f"{days.index.min().year}–{days.index.max().year}",
     }
 
 
@@ -1739,9 +1844,9 @@ if st.session_state["mode"] is None:
     st.markdown("###### Step 3 · What do you want to see?")
     cards = [
         (
-            ":material/insights: Explore the data",
-            "Your chances of the wind and warmth you want, by month, by hour "
-            "of the day and year by year.",
+            ":material/insights: Explore this spot",
+            "Your chances of the wind and warmth you want, all year or on your "
+            "dates, and how your other spots compare.",
             "Start exploring",
             "explore",
         ),
@@ -1832,9 +1937,38 @@ SESSION_WINDOWS = (hours,)
 SESSION_TEXT = "all day" if hours == (0, 23) else f"{hours[0]:02d}:00–{hours[1]:02d}:59"
 st.sidebar.caption("Every hour of the day" if hours == (0, 23) else f"{SESSION_TEXT} local time")
 
+DATES = None
 if EXPLORING:
-    span = st.sidebar.segmented_control(
-        "Years", list(LOOKBACK), required=True, key=sticky("years", "20 years"),
+    season = pick(
+        st.sidebar.segmented_control(
+            "Dates", ["All year", "Pick dates"], required=True,
+            key=sticky("season", "All year"),
+        ),
+        "All year",
+    )
+    if season == "Pick dates":
+        today = date.today()
+        coming = date(today.year + (today.month == 12), today.month % 12 + 1, 1)
+        # Not sticky(): a range picker only knows it is a range from the value
+        # it is given, and Streamlit objects to a value given alongside one set
+        # through session state. So the kept range goes in as that value.
+        picked = st.sidebar.date_input(
+            "From – to", value=st.session_state.get("kept_dates", (coming, coming.replace(day=15))),
+            min_value=date(today.year, 1, 1), max_value=date(today.year + 1, 12, 31),
+            format="DD.MM.YYYY", key="dates",
+            help="Only the day and month count: every year in the record is "
+            "checked on these dates. To span New Year, end in the next year.",
+        )
+        st.session_state["kept_dates"] = picked
+        DATES = as_dates(picked)
+        if DATES:
+            st.sidebar.caption(f"{dates_label(DATES)}, in every year")
+    # segmented_control can still come back empty; keep the default then.
+    span = pick(
+        st.sidebar.segmented_control(
+            "Years", list(LOOKBACK), required=True, key=sticky("years", "20 years"),
+        ),
+        "20 years",
     )
 
 # Forward, or switching sport in the sidebar, can land here with a range
@@ -2094,16 +2228,21 @@ if st.session_state["mode"] == "rating":
 # --- Explore: your chances of the conditions you want ---------------------
 
 years_back = LOOKBACK[span]
-first_year = (
-    data_start.year if years_back is None
-    else max(data_start.year, data_end.year - years_back + 1)
-)
+first_year = lookback_start(df, years_back)
 with st.spinner("Counting your days..."):
     odds = condition_odds(
         dataset_path, dataset_path.stat().st_mtime, LOCAL_TZ, first_year,
-        (wind_low, wind_high), air_min, lasting, hours,
+        (wind_low, wind_high), air_min, lasting, hours, DATES,
     )
 by_month, days = odds["month"], odds["days"]
+# How many days the window holds in an ordinary year.
+window_length = 365 if DATES is None else len(window_days(DATES))
+# The years your dates actually turn up in, which a window still to come
+# this year stops short of.
+years_text = (
+    f"{days.index.min().year}–{days.index.max().year}" if len(days)
+    else f"{first_year}–{data_end.year}"
+)
 
 wind_text = (
     f"{wind_low}+ kn" if wind_high >= WIND_TOP else
@@ -2118,129 +2257,115 @@ within = (
 
 st.html(
     '<div class="reveal" style="font-size:1.5rem;font-weight:650">'
-    + reveal(f"How often you get {wanted}")
+    + reveal(f"How often you get {wanted}" + ("" if DATES is None else f", {dates_label(DATES)}"))
     + '</div><hr class="accent-rule">'
 )
 st.caption(
     f"A day counts when that lasts {lasting} h in a row {within} local time · "
-    f"{first_year}–{data_end.year} · data: {SOURCE_CREDIT}"
+    f"{years_text} · data: {SOURCE_CREDIT}"
 )
 
-overall = float(days["good"].mean() * 100) if len(days) else 0.0
-if overall == 0:
-    st.info(
-        f"Not a single day like that between {first_year} and {data_end.year}. "
-        "Try less wind, cooler air, a shorter stretch or more hours on the water."
+
+def expect_text(pct):
+    """A chance put as days: out of your dates, or out of a year."""
+    count = round(pct / 100 * window_length)
+    return f"{count} of {window_length} days" if DATES else f"{count} days a year"
+
+
+def day_axis(**options):
+    """A time axis read in days, '1 Jun'. On a short window, a tick every day
+    or few counted from its first day: left to itself the axis ticks every
+    few hours, or restarts its count at the 1st and crowds the month's end."""
+    if window_length <= 40:
+        order = window_days(DATES)
+        ticks = axis_dates([m for m, _ in order], [d for _, d in order], DATES)
+        options["values"] = [
+            alt.DateTime(year=int(tick.year), month=int(tick.month), date=int(tick.day))
+            for tick in ticks.iloc[::max(1, -(-window_length // 12))]
+        ]
+    return alt.Axis(format="%-d %b", labelAngle=0, labelOverlap="greedy", grid=False, **options)
+
+
+def spot_ranking():
+    """The same conditions, hours and dates at every spot you have downloaded,
+    best first: where to go for a training camp or a regatta."""
+    st.markdown("**Against your other spots**")
+    spots = downloaded_locations()
+    names = [entry["name"] for entry in spots.values()]
+    rows, no_air = [], []
+    with st.spinner("Counting days at your other spots..."):
+        for key, entry in spots.items():
+            path = entry["path"]
+            result = spot_chance(
+                path, path.stat().st_mtime, entry["zone"], years_back,
+                (wind_low, wind_high), air_min, lasting, hours, DATES,
+            )
+            if result is None:
+                no_air.append(entry["name"])
+                continue
+            here = path == dataset_path
+            # Two spots can share a name; the key tells them apart.
+            name = entry["name"] if names.count(entry["name"]) == 1 else f"{entry['name']} · {key}"
+            rows.append({
+                "spot": f"{name} (this spot)" if here else name,
+                "here": here,
+                "pct": result["pct"],
+                "note": f"{percent(result['pct'])} · {expect_text(result['pct'])}",
+                "years": result["years"],
+                "source": f"MeteoSwiss {entry['station']}" if entry.get("station") else "ERA5",
+            })
+    left_out = (
+        f"Left out, no air temperature on record: {', '.join(no_air)}." if no_air else ""
     )
-    st.stop()
+    if len(rows) < 2:
+        st.caption(
+            "Download another spot from the map to see how it compares. " + left_out
+        )
+        return
 
-month_names = [calendar.month_abbr[m] for m in range(1, 13)]
-month_days = [calendar.monthrange(2001, m)[1] for m in range(1, 13)]
-best_month = int(by_month["good"].idxmax())
-best_pct = float(by_month.loc[best_month, "good"])
-best_days = round(best_pct / 100 * month_days[best_month - 1])
-best_days_text = (
-    "under a day" if best_days < 1 else f"about {best_days} day{'s' if best_days > 1 else ''}"
-)
-start_hour, end_hour, _ = odds["best_window"]
-
-kpis = st.columns(4)
-kpis[0].metric(
-    "Any day of the year", percent(overall), border=True,
-    icon=":material/event_available:",
-    help=f"Share of all days {first_year}–{data_end.year} that give you this",
-)
-kpis[1].metric(
-    "Best month", calendar.month_name[best_month], border=True,
-    icon=":material/trending_up:", delta_arrow="off", delta_color="off",
-    delta=f"{percent(best_pct)} · {best_days_text}",
-)
-kpis[2].metric(
-    "Best time of day", f"{start_hour:02d}:00–{end_hour:02d}:59", border=True,
-    icon=":material/schedule:", help="The three hours that most often have it, all year",
-)
-kpis[3].metric(
-    "Wind comes from", prevailing_direction(odds["direction"]), border=True,
-    icon=":material/explore:", help="When it is on, during your hours",
-)
-
-# Month by month. With a temperature set, the blue cap shows the days that
-# bring the wind but not the warmth.
-GOOD_LABEL, COLD_LABEL = "Wind and warm air", "Wind, but colder"
-month_data = pd.DataFrame({
-    "month": range(1, 13),
-    "name": month_names,
-    "good": by_month["good"].fillna(0).to_numpy(),
-    "windy": by_month["windy"].fillna(0).to_numpy(),
-})
-month_data["days"] = month_data["good"] / 100 * month_days
-month_tooltip = [
-    alt.Tooltip("name:N", title="month"),
-    alt.Tooltip("good:Q", title="% of days with it", format=".0f"),
-    alt.Tooltip("days:Q", title="days in a typical month", format=".1f"),
-]
-if air_min is not None:
-    month_tooltip.insert(2, alt.Tooltip("windy:Q", title="% with the wind alone", format=".0f"))
-
-# Defaults to the best month; a click anywhere in a column picks another.
-pick_month = alt.selection_point(
-    name="month_click", fields=["month"], on="click", value=[{"month": best_month}],
-)
-x_month = alt.X("name:N", sort=month_names, title=None, axis=alt.Axis(labelAngle=0))
-bar_style = dict(size=22, cornerRadiusTopLeft=4, cornerRadiusTopRight=4)
-# The picked month gets a soft band behind it rather than dimming the rest,
-# so every bar keeps its true colour.
-layers = [
-    alt.Chart(month_data)
-    .mark_bar(size=44, color=WATER_SHADE)
-    .encode(x=x_month, y=alt.value(0), y2=alt.value(alt.expr("height")),
-            opacity=alt.condition(pick_month, alt.value(0.14), alt.value(0.0)))
-]
-if air_min is not None:
-    series = alt.Scale(domain=[GOOD_LABEL, COLD_LABEL], range=[GOOD_COLOR, COLD_COLOR])
-    layers.append(
-        alt.Chart(month_data.assign(series=COLD_LABEL))
-        .mark_bar(**bar_style)
-        .encode(x=x_month, y=alt.Y("windy:Q", title="% of days"),
-                color=alt.Color("series:N", scale=series, title=None,
-                                legend=alt.Legend(orient="top")))
+    ranking = pd.DataFrame(rows).sort_values("pct", ascending=False)
+    base = alt.Chart(ranking).encode(
+        # No axis: each bar carries its number. The domain runs past 100 to
+        # leave the longest bar room for its label.
+        x=alt.X("pct:Q", axis=None, scale=alt.Scale(domain=[0, 145])),
+        y=alt.Y("spot:N", sort=ranking["spot"].tolist(), title=None,
+                axis=alt.Axis(labelLimit=260, labelFontSize=12)),
+        tooltip=[
+            alt.Tooltip("spot:N"),
+            alt.Tooltip("pct:Q", title="% of days with it", format=".0f"),
+            alt.Tooltip("years:N", title="years counted"),
+            alt.Tooltip("source:N"),
+        ],
     )
-    good_color = alt.Color("series:N", scale=series, title=None)
-else:
-    good_color = alt.value(GOOD_COLOR)
-layers.append(
-    alt.Chart(month_data.assign(series=GOOD_LABEL))
-    # The surface-coloured ring keeps the orange apart from the blue behind it.
-    .mark_bar(**bar_style, stroke=SURFACE, strokeWidth=2)
-    .encode(x=x_month, y=alt.Y("good:Q", title="% of days"), color=good_color)
-)
-# Invisible full-height columns on top: the click and hover target, so a
-# month is easy to hit even where its bar is short.
-layers.append(
-    alt.Chart(month_data)
-    .mark_bar(size=44, opacity=0)
-    .encode(x=x_month, y=alt.value(0), y2=alt.value(alt.expr("height")),
-            tooltip=month_tooltip)
-    .add_params(pick_month)
-)
-
-chart_col, hour_col = st.columns([3, 2], gap="medium")
-with chart_col:
-    st.markdown("**Month by month**")
-    event = st.altair_chart(
-        alt.layer(*layers).properties(height=300), width="stretch",
-        on_select="rerun", key="month_pick",
+    st.altair_chart(
+        alt.layer(
+            base.mark_bar(size=18, cornerRadiusTopRight=4, cornerRadiusBottomRight=4)
+            .encode(color=alt.condition(alt.datum.here, alt.value(GOOD_COLOR),
+                                        alt.value(WATER_SHADE))),
+            base.mark_text(align="left", dx=6, fontSize=12, color=theme_colors()["fg"])
+            .encode(text="note:N"),
+        ).properties(height=34 * len(ranking)),
+        width="stretch",
     )
-    clicked = (event.selection or {}).get("month_click") or []
-    selected = clicked[0]["month"] if clicked else best_month
-    st.caption("Click a month to see its day and its wind →")
+    record = "whole record" if years_back is None else f"last {years_back} years"
+    st.caption(
+        f"The same conditions{', dates' if DATES else ''} and hours ({within}, local "
+        f"time at each spot), over each spot's {record}. {left_out}"
+    )
+    if ranking["source"].str.startswith("MeteoSwiss").nunique() > 1:
+        st.caption(
+            ":material/info: A MeteoSwiss station measures the wind where it stands; "
+            "ERA5 averages a 25 km cell, which smooths out local effects. Read the "
+            "gaps between the two kinds with that in mind."
+        )
 
-with hour_col:
-    st.markdown(f"**{calendar.month_name[selected]} through the day**")
+
+def draw_hours(pct):
+    """Share of each hour that has it, with your hours on the water shaded."""
     hour_data = pd.DataFrame({
         "mid": np.arange(24) + 0.5,
         "label": [f"{h:02d}:00–{h:02d}:59" for h in range(24)],
-        "pct": odds["hour"].loc[selected].fillna(0).to_numpy(),
+        "pct": pct.fillna(0).to_numpy(),
     })
     x_hour = alt.X(
         "mid:Q", scale=alt.Scale(domain=[0, 24]), title=None,
@@ -2272,49 +2397,319 @@ with hour_col:
     )
     st.caption("Share of each hour that has it. Shaded: your hours on the water.")
 
+
+overall = float(days["good"].mean() * 100) if len(days) else 0.0
+if overall == 0:
+    st.info(
+        "Not a single day like that "
+        + ("" if DATES is None else f"on {dates_label(DATES)} ")
+        + f"in {years_text}. Try less wind, cooler air, a shorter stretch, more "
+        "hours on the water" + (" or other dates." if DATES else ".")
+    )
+    spot_ranking()
+    st.stop()
+
+month_names = [calendar.month_abbr[m] for m in range(1, 13)]
+month_days = [calendar.monthrange(2001, m)[1] for m in range(1, 13)]
+GOOD_LABEL, COLD_LABEL = "Wind and warm air", "Wind, but colder"
+start_hour, end_hour, _ = odds["best_window"]
+
+kpis = st.columns(4)
+if DATES is None:
+    best_month = int(by_month["good"].idxmax())
+    best_pct = float(by_month.loc[best_month, "good"])
+    best_days = round(best_pct / 100 * month_days[best_month - 1])
+    best_days_text = (
+        "under a day" if best_days < 1 else f"about {best_days} day{'s' if best_days > 1 else ''}"
+    )
+    kpis[0].metric(
+        "Any day of the year", percent(overall), border=True,
+        icon=":material/event_available:",
+        help=f"Share of all days {years_text} that give you this",
+    )
+    kpis[1].metric(
+        "Best month", calendar.month_name[best_month], border=True,
+        icon=":material/trending_up:", delta_arrow="off", delta_color="off",
+        delta=f"{percent(best_pct)} · {best_days_text}",
+    )
+else:
+    # Only years whose whole window is on record, so a gap in the readings
+    # does not pass for a lean year.
+    per_year = days["good"].groupby(window_year(days.index, DATES)).agg(["sum", "size"])
+    full = per_year.loc[per_year["size"] >= window_length, "sum"]
+    expected = overall / 100 * window_length
+    kpis[0].metric(
+        "Chance on a given day", percent(overall), border=True,
+        icon=":material/event_available:",
+        help=f"Share of all days {dates_label(DATES)} in {years_text} that gave you this",
+    )
+    if window_length == 1:
+        # A single day, a race day: count the years rather than the days.
+        kpis[1].metric(
+            "Years that had it", f"{full.sum():.0f} of {len(full)}", border=True,
+            icon=":material/date_range:",
+        )
+    else:
+        kpis[1].metric(
+            "Days you can expect",
+            f"{expected:.0f} of {window_length}" if window_length >= 5
+            else f"{expected:.1f} of {window_length}",
+            border=True, icon=":material/date_range:",
+            delta=(
+                f"{full.min():.0f} every year" if len(full) > 1 and full.min() == full.max()
+                else f"{full.min():.0f}–{full.max():.0f}, leanest to best year"
+                if len(full) > 1 else None
+            ),
+            delta_arrow="off", delta_color="off",
+            help="In a typical year: the chance on a given day times the days in your window",
+        )
+kpis[2].metric(
+    "Best time of day", f"{start_hour:02d}:00–{end_hour:02d}:59", border=True,
+    icon=":material/schedule:",
+    help="The three hours that most often have it, "
+    + ("all year" if DATES is None else "on your dates"),
+)
+kpis[3].metric(
+    "Wind comes from", prevailing_direction(odds["direction"]), border=True,
+    icon=":material/explore:", help="When it is on, during your hours",
+)
+
+bar_style = dict(cornerRadiusTopLeft=4, cornerRadiusTopRight=4)
+if air_min is not None:
+    series = alt.Scale(domain=[GOOD_LABEL, COLD_LABEL], range=[GOOD_COLOR, COLD_COLOR])
+    good_color = alt.Color("series:N", scale=series, title=None)
+else:
+    good_color = alt.value(GOOD_COLOR)
+
+chart_col, hour_col = st.columns([3, 2], gap="medium")
+if DATES is None:
+    # Month by month. With a temperature set, the blue cap shows the days
+    # that bring the wind but not the warmth.
+    month_data = pd.DataFrame({
+        "month": range(1, 13),
+        "name": month_names,
+        "good": by_month["good"].fillna(0).to_numpy(),
+        "windy": by_month["windy"].fillna(0).to_numpy(),
+    })
+    month_data["days"] = month_data["good"] / 100 * month_days
+    month_tooltip = [
+        alt.Tooltip("name:N", title="month"),
+        alt.Tooltip("good:Q", title="% of days with it", format=".0f"),
+        alt.Tooltip("days:Q", title="days in a typical month", format=".1f"),
+    ]
+    if air_min is not None:
+        month_tooltip.insert(2, alt.Tooltip("windy:Q", title="% with the wind alone", format=".0f"))
+
+    # Defaults to the best month; a click anywhere in a column picks another.
+    pick_month = alt.selection_point(
+        name="month_click", fields=["month"], on="click", value=[{"month": best_month}],
+    )
+    x_month = alt.X("name:N", sort=month_names, title=None, axis=alt.Axis(labelAngle=0))
+    # The picked month gets a soft band behind it rather than dimming the rest,
+    # so every bar keeps its true colour.
+    layers = [
+        alt.Chart(month_data)
+        .mark_bar(size=44, color=WATER_SHADE)
+        .encode(x=x_month, y=alt.value(0), y2=alt.value(alt.expr("height")),
+                opacity=alt.condition(pick_month, alt.value(0.14), alt.value(0.0)))
+    ]
+    if air_min is not None:
+        layers.append(
+            alt.Chart(month_data.assign(series=COLD_LABEL))
+            .mark_bar(size=22, **bar_style)
+            .encode(x=x_month, y=alt.Y("windy:Q", title="% of days"),
+                    color=alt.Color("series:N", scale=series, title=None,
+                                    legend=alt.Legend(orient="top")))
+        )
+    layers.append(
+        alt.Chart(month_data.assign(series=GOOD_LABEL))
+        # The surface-coloured ring keeps the orange apart from the blue behind it.
+        .mark_bar(size=22, **bar_style, stroke=SURFACE, strokeWidth=2)
+        .encode(x=x_month, y=alt.Y("good:Q", title="% of days"), color=good_color)
+    )
+    # Invisible full-height columns on top: the click and hover target, so a
+    # month is easy to hit even where its bar is short.
+    layers.append(
+        alt.Chart(month_data)
+        .mark_bar(size=44, opacity=0)
+        .encode(x=x_month, y=alt.value(0), y2=alt.value(alt.expr("height")),
+                tooltip=month_tooltip)
+        .add_params(pick_month)
+    )
+
+    with chart_col:
+        st.markdown("**Month by month**")
+        event = st.altair_chart(
+            alt.layer(*layers).properties(height=300), width="stretch",
+            on_select="rerun", key="month_pick",
+        )
+        clicked = (event.selection or {}).get("month_click") or []
+        selected = clicked[0]["month"] if clicked else best_month
+        st.caption("Click a month to see its day and its wind →")
+
+    with hour_col:
+        st.markdown(f"**{calendar.month_name[selected]} through the day**")
+        draw_hours(odds["hour"].loc[selected])
+else:
+    # Day by day across your dates: in how many of the years each one had it.
+    order = window_days(DATES)
+    by_day = (
+        days.groupby([days.index.month.rename("month"), days.index.day.rename("day")]).mean()
+        .reindex(pd.MultiIndex.from_tuples(order, names=["month", "day"])) * 100
+    )
+    day_data = pd.DataFrame({
+        "day": axis_dates([m for m, _ in order], [d for _, d in order], DATES),
+        "name": [f"{d} {calendar.month_abbr[m]}" for m, d in order],
+        "good": by_day["good"].fillna(0).to_numpy(),
+        "windy": by_day["windy"].fillna(0).to_numpy(),
+    })
+    # Each day sits centred on its tick: the hover column spans the whole day,
+    # the bar most of it, leaving a sliver of background between bars.
+    day_data["day_start"] = day_data["day"] - pd.Timedelta(hours=12)
+    day_data["day_end"] = day_data["day"] + pd.Timedelta(hours=12)
+    day_data["bar_from"] = day_data["day"] - pd.Timedelta(hours=8)
+    day_data["bar_to"] = day_data["day"] + pd.Timedelta(hours=8)
+    x_day = alt.X("bar_from:T", title=None, axis=day_axis())
+    day_tooltip = [
+        alt.Tooltip("name:N", title="day"),
+        alt.Tooltip("good:Q", title="% of years with it", format=".0f"),
+    ]
+    if air_min is not None:
+        day_tooltip.append(alt.Tooltip("windy:Q", title="% with the wind alone", format=".0f"))
+    # A ring like the months' only while the bars are wide enough to keep it.
+    ring = dict(stroke=SURFACE, strokeWidth=2) if window_length <= 45 else {}
+
+    layers = []
+    if air_min is not None:
+        layers.append(
+            alt.Chart(day_data.assign(series=COLD_LABEL))
+            .mark_bar(**bar_style)
+            .encode(x=x_day, x2="bar_to:T", y=alt.Y("windy:Q", title="% of years"),
+                    y2=alt.datum(0),
+                    color=alt.Color("series:N", scale=series, title=None,
+                                    legend=alt.Legend(orient="top")))
+        )
+    layers += [
+        alt.Chart(day_data.assign(series=GOOD_LABEL))
+        .mark_bar(**bar_style, **ring)
+        .encode(x=x_day, x2="bar_to:T", y=alt.Y("good:Q", title="% of years"),
+                y2=alt.datum(0), color=good_color),
+        alt.Chart(pd.DataFrame({"pct": [overall]}))
+        .mark_rule(color=theme_colors()["fg"], strokeDash=[4, 4], opacity=0.6)
+        .encode(y="pct:Q"),
+        alt.Chart(day_data)
+        .mark_bar(opacity=0)
+        .encode(x="day_start:T", x2="day_end:T", y=alt.value(0), y2=alt.value(alt.expr("height")),
+                tooltip=day_tooltip),
+    ]
+    with chart_col:
+        st.markdown("**Day by day**")
+        st.altair_chart(alt.layer(*layers).properties(height=300), width="stretch")
+        st.caption(
+            f"In how many of the years each day had it. Dashed: {percent(overall)}, "
+            "the chance on any one of your dates."
+        )
+
+    with hour_col:
+        st.markdown(f"**{dates_label(DATES)} through the day**")
+        draw_hours(odds["dates_hour"])
+
+st.divider()
+spot_ranking()
+
 st.divider()
 year_col, rose_col = st.columns([3, 2], gap="medium")
 
 with year_col:
     st.markdown("**Year by year**")
-    year_data = odds["year"].rename("pct").reset_index()
-    year_data["name"] = [calendar.month_abbr[m] for m in year_data["month"]]
-    years_shown = year_data["year"].nunique()
-    st.altair_chart(
-        alt.Chart(year_data)
-        .mark_rect(stroke=SURFACE, strokeWidth=2 if years_shown <= 30 else 1)
-        .encode(
-            x=alt.X("name:N", sort=month_names, title=None,
-                    axis=alt.Axis(labelAngle=0, orient="top")),
-            y=alt.Y("year:O", sort="descending", title=None,
-                    axis=alt.Axis(labelOverlap="greedy")),
-            color=alt.Color(
-                "pct:Q", title="% of days",
-                scale=alt.Scale(range=CHANCE_RAMP, domain=[0, max(1.0, year_data["pct"].max())]),
-                legend=alt.Legend(orient="bottom", gradientLength=220),
-            ),
-            tooltip=[alt.Tooltip("year:O"), alt.Tooltip("name:N", title="month"),
-                     alt.Tooltip("pct:Q", title="% of days with it", format=".0f")],
+    if DATES is None:
+        year_data = odds["year"].rename("pct").reset_index()
+        year_data["name"] = [calendar.month_abbr[m] for m in year_data["month"]]
+        years_shown = year_data["year"].nunique()
+        st.altair_chart(
+            alt.Chart(year_data)
+            .mark_rect(stroke=SURFACE, strokeWidth=2 if years_shown <= 30 else 1)
+            .encode(
+                x=alt.X("name:N", sort=month_names, title=None,
+                        axis=alt.Axis(labelAngle=0, orient="top")),
+                y=alt.Y("year:O", sort="descending", title=None,
+                        axis=alt.Axis(labelOverlap="greedy")),
+                color=alt.Color(
+                    "pct:Q", title="% of days",
+                    scale=alt.Scale(range=CHANCE_RAMP, domain=[0, max(1.0, year_data["pct"].max())]),
+                    legend=alt.Legend(orient="bottom", gradientLength=220),
+                ),
+                tooltip=[alt.Tooltip("year:O"), alt.Tooltip("name:N", title="month"),
+                         alt.Tooltip("pct:Q", title="% of days with it", format=".0f")],
+            )
+            .properties(height=min(max(16 * years_shown, 180), 520)),
+            width="stretch",
         )
-        .properties(height=min(max(16 * years_shown, 180), 520)),
-        width="stretch",
-    )
-    st.caption("One square per month of each year: the brighter, the more days had it.")
+        st.caption("One square per month of each year: the brighter, the more days had it.")
+    else:
+        # One square per day of each year, so runs of good days and lean
+        # years show for what they are.
+        cells = days[~((days.index.month == 2) & (days.index.day == 29))]
+        kinds = (
+            {"Had it": GOOD_COLOR, "Did not": MISS_COLOR} if air_min is None
+            else {GOOD_LABEL: GOOD_COLOR, COLD_LABEL: COLD_COLOR, "Neither": MISS_COLOR}
+        )
+        labels = list(kinds)
+        heat = pd.DataFrame({
+            "day": axis_dates(cells.index.month, cells.index.day, DATES),
+            "year": window_year(cells.index, DATES),
+            "date": [f"{d.day} {calendar.month_abbr[d.month]} {d.year}" for d in cells.index],
+            "hit": cells["good"].to_numpy(),
+            "status": np.where(
+                cells["good"], labels[0],
+                np.where(cells["windy"], labels[1], labels[-1]),
+            ),
+        })
+        heat["day_start"] = heat["day"] - pd.Timedelta(hours=12)
+        heat["day_end"] = heat["day"] + pd.Timedelta(hours=12)
+        heat["count"] = heat.groupby("year")["hit"].transform("sum")
+        years_shown = heat["year"].nunique()
+        st.altair_chart(
+            alt.Chart(heat)
+            .mark_rect(stroke=SURFACE, strokeWidth=1 if window_length <= 45 else 0)
+            .encode(
+                x=alt.X("day_start:T", title=None, axis=day_axis(orient="top")),
+                x2="day_end:T",
+                y=alt.Y("year:O", sort="descending", title=None,
+                        axis=alt.Axis(labelOverlap="greedy")),
+                color=alt.Color(
+                    "status:N", title=None,
+                    scale=alt.Scale(domain=labels, range=list(kinds.values())),
+                    legend=alt.Legend(orient="bottom"),
+                ),
+                tooltip=[alt.Tooltip("date:N", title="day"),
+                         alt.Tooltip("status:N", title="had it"),
+                         alt.Tooltip("count:Q", title=f"days that year, of {window_length}")],
+            )
+            .properties(height=min(max(16 * years_shown, 180), 520)),
+            width="stretch",
+        )
+        st.caption("One square per day of each year. Hover for how many days that year had it.")
 
 with rose_col:
-    in_month = odds["on_month"] == selected
-    if in_month.any():
+    if DATES is None:
+        in_month = odds["on_month"] == selected
+        when, direction, knots = (
+            calendar.month_name[selected], odds["direction"][in_month], odds["knots"][in_month],
+        )
+    else:
+        when, direction, knots = dates_label(DATES), odds["direction"], odds["knots"]
+    if len(direction):
         st.markdown(
-            f"**{calendar.month_name[selected]}** · when it is on, the wind comes "
-            f"from **{prevailing_direction(odds['direction'][in_month])}**"
+            f"**{when}** · when it is on, the wind comes from "
+            f"**{prevailing_direction(direction)}**"
         )
         st.pyplot(
-            draw_rose(odds["direction"][in_month], odds["knots"][in_month],
-                      ACTIVITIES[activity]["ladder"], "knots"),
+            draw_rose(direction, knots, ACTIVITIES[activity]["ladder"], "knots"),
             width="stretch",
         )
     else:
-        st.info(f"No hours like that in {calendar.month_name[selected]}.")
+        st.info(f"No hours like that in {when}.")
     # The rose says which way; the map says if that way is water.
     locator_map(LATITUDE, LONGITUDE, key="explore_map", height=210, cell=not STATION)
 
@@ -2323,13 +2718,18 @@ with rose_col:
 # Kept out of the main page so the charts end cleanly.
 
 with st.sidebar.expander("The numbers"):
-    table = pd.DataFrame({
-        "Month": month_names,
-        "With it %": month_data["good"].round(0),
-        "Days": month_data["days"].round(1),
-    })
-    if air_min is not None:
-        table.insert(2, "Wind alone %", month_data["windy"].round(0))
+    if DATES is None:
+        table = pd.DataFrame({
+            "Month": month_names,
+            "With it %": month_data["good"].round(0),
+            "Days": month_data["days"].round(1),
+        })
+        if air_min is not None:
+            table.insert(2, "Wind alone %", month_data["windy"].round(0))
+    else:
+        table = pd.DataFrame({"Day": day_data["name"], "With it %": day_data["good"].round(0)})
+        if air_min is not None:
+            table["Wind alone %"] = day_data["windy"].round(0)
     st.dataframe(table, hide_index=True, width="stretch")
     per_day = days.rename(columns={"good": "with_it", "windy": "wind_alone"})
     per_day.index = per_day.index.date
