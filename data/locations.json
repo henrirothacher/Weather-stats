@@ -1,0 +1,66 @@
+{
+  "+37.00_-8.25": {
+    "lat": 37.0,
+    "lon": -8.25,
+    "name": "+37.00, -8.25",
+    "zone": "Europe/Lisbon"
+  },
+  "+50.50_-2.25": {
+    "lat": 50.5,
+    "lon": -2.25,
+    "name": "+50.50, -2.25",
+    "zone": "Europe/London"
+  },
+  "+36.75_-8.25": {
+    "lat": 36.75,
+    "lon": -8.25,
+    "name": "Vilamoura",
+    "zone": "Europe/Lisbon"
+  },
+  "+48.75_+14.00": {
+    "lat": 48.75,
+    "lon": 14.0,
+    "name": "+48.75, +14.00",
+    "zone": "Europe/Prague"
+  },
+  "+39.50_+0.00": {
+    "lat": 39.5,
+    "lon": 0.0,
+    "name": "Valencia",
+    "zone": "Europe/Madrid"
+  },
+  "+46.75_+17.50": {
+    "lat": 46.75,
+    "lon": 17.5,
+    "name": "+46.75, +17.50",
+    "zone": "Europe/Budapest"
+  },
+  "+47.25_+8.50": {
+    "lat": 47.25,
+    "lon": 8.5,
+    "name": "+47.25, +8.50",
+    "zone": "Europe/Zurich"
+  },
+  "+36.00_-5.75": {
+    "lat": 36.0,
+    "lon": -5.75,
+    "name": "+36.00, -5.75",
+    "zone": "Europe/Madrid"
+  },
+  "station_QUI": {
+    "lat": 47.128739,
+    "lon": 9.21605,
+    "zone": "Europe/Zurich",
+    "name": "Quinten",
+    "station": "QUI",
+    "height": 419.0
+  },
+  "station_VLS": {
+    "lat": 46.627758,
+    "lon": 9.188711,
+    "zone": "Europe/Zurich",
+    "name": "Vals",
+    "station": "VLS",
+    "height": 1242.0
+  }
+}
