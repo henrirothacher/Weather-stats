@@ -14,7 +14,7 @@ Built with Streamlit on three sources, picked on the start screen:
   most hourly since the 1970s. One report an hour is kept, the one nearest
   the hour; years with only a few reports a day are left out.
 
-The station maps show only stations by the water: within 5 km of the sea or
+The station maps show only stations by the water: within 10 km of the sea or
 a lake, as [Natural Earth](https://www.naturalearthdata.com/) maps the
 shores (public domain), and for MeteoSwiss not on a summit. A switch on the
 start screen shows them all, for lakes too small for Natural Earth. A

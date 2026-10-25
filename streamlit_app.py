@@ -661,15 +661,15 @@ OGD_ITEMS = "https://data.geo.admin.ch/api/stac/v1/collections/ch.meteoschweiz.o
 # METARs as the Iowa Environmental Mesonet archives them: free, no account,
 # one request a second at most.
 IEM = "https://mesonet.agron.iastate.edu"
-# Where a station map opens before you pick one, and how many of the
-# stations around what it looks at it draws.
+# Where a station map opens before you pick one, and how many stations it
+# draws at most before it thins them out.
 SWISS_CENTRE = (46.8, 8.2)
 STATION_ZOOM = {"meteoswiss": 8, "metar": 5}
 NEARBY_STATIONS = 200
 # A station this close to the sea or a lake, in km, is by the water. The
 # shores are Natural Earth's (public domain): coasts and lakes at 1:10m,
 # with the extra lakes it maps for Europe and North America.
-SHORE_KM = 5
+SHORE_KM = 10
 SHORES = data_dir / "shores.npy"
 NATURAL_EARTH = "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson"
 SHORE_LAYERS = ["coastline", "lakes", "lakes_europe", "lakes_north_america"]
@@ -843,6 +843,23 @@ def km_from(latitude, longitude, lats, lons):
     east = np.radians((lons - longitude + 180) % 360 - 180) * np.cos(np.radians(latitude))
     north = np.radians(lats - latitude)
     return np.hypot(east, north) * 6371
+
+
+def stations_in_view(stations, bounds):
+    """The stations inside a map's view. Past NEARBY_STATIONS of them, one
+    per patch of the view, the longest on record first, so a wide view shows
+    where they are without a dot on every one."""
+    south, west = bounds["_southWest"]["lat"], bounds["_southWest"]["lng"]
+    north, east = bounds["_northEast"]["lat"], bounds["_northEast"]["lng"]
+    # Past the date line the map counts on to -190 or 200; measured from
+    # the view's west edge, every longitude lines up.
+    inside = stations[stations["lat"].between(south, north)
+                      & ((stations["lon"] - west) % 360 <= east - west)]
+    if len(inside) <= NEARBY_STATIONS:
+        return inside
+    patch = max(north - south, east - west) / 30
+    return inside.sort_values("since").groupby(
+        [inside["lat"] // patch, inside["lon"] // patch]).head(1)
 
 
 def coordinates(nested):
@@ -1834,25 +1851,33 @@ if st.session_state["spot"] is None:
                 else "Click a station, or anywhere for the nearest one"
             )
             world.get_root().html.add_child(folium.Element(f'<div class="map-hint">{hint}</div>'))
-            # The stations nearest where the map looks (all of MeteoSwiss's, the
-            # airports around you); the ones you have downloaded stand out.
+            # The stations where the map looks, as it reported its view after
+            # the last move; before it has, those nearest its centre. The ones
+            # you have downloaded stand out. They are a layer of their own, so
+            # a move swaps the dots without redrawing the map under them.
+            view = (st.session_state.get(f"{source}_picker") or {}).get("bounds")
+            near = (
+                stations_in_view(stations, view) if view and view["_southWest"]["lat"] is not None
+                else stations.loc[km_from(*focus, stations["lat"], stations["lon"])
+                                  .nsmallest(NEARBY_STATIONS).index]
+            )
             on_disk = {entry["station"] for entry in saved.values() if entry.get("source") == source}
-            near = km_from(*focus, stations["lat"], stations["lon"]).nsmallest(NEARBY_STATIONS).index
-            for abbr, row in stations.loc[near].iterrows():
+            dots = folium.FeatureGroup(name="stations")
+            for abbr, row in near.iterrows():
                 if abbr != picked:
                     dot_marker(row["lat"], row["lon"], labels[abbr],
-                               idle=abbr not in on_disk).add_to(world)
+                               idle=abbr not in on_disk).add_to(dots)
             if picked:
-                dot_marker(*focus, labels[picked], picked=True).add_to(world)
+                dot_marker(*focus, labels[picked], picked=True).add_to(dots)
 
             recentre = st.session_state.pop("station_recentre", False)
             result = st_folium(
                 world, height=LANDING_MAP_HEIGHT, use_container_width=True,
-                key=f"{source}_picker",
+                key=f"{source}_picker", feature_group_to_add=dots,
                 center=list(focus) if recentre else None,
                 zoom=10 if recentre else None,
                 returned_objects=["last_clicked", "last_object_clicked",
-                                  "last_object_clicked_count"],
+                                  "last_object_clicked_count", "bounds"],
             )
 
     fresh = fresh_click(result, "click_seen" if source == "era5" else "station_clicks_seen")
