@@ -29,7 +29,7 @@ st.set_page_config(
 )
 
 # Goes up by 0.1 with every commit pushed to GitHub (2.9 -> 3.0).
-APP_VERSION = "2.3"
+APP_VERSION = "2.4"
 
 def svg_image(markup, view_box, css_class=""):
     """A drawing for st.html. Its sanitiser drops <svg> outright but lets an
@@ -666,6 +666,13 @@ IEM = "https://mesonet.agron.iastate.edu"
 SWISS_CENTRE = (46.8, 8.2)
 STATION_ZOOM = {"meteoswiss": 8, "metar": 5}
 NEARBY_STATIONS = 200
+# A station this close to the sea or a lake, in km, is by the water. The
+# shores are Natural Earth's (public domain): coasts and lakes at 1:10m,
+# with the extra lakes it maps for Europe and North America.
+SHORE_KM = 5
+SHORES = data_dir / "shores.npy"
+NATURAL_EARTH = "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson"
+SHORE_LAYERS = ["coastline", "lakes", "lakes_europe", "lakes_north_america"]
 
 
 def cds_client():
@@ -737,6 +744,9 @@ def meteoswiss_stations():
         since.reindex(table.index), format="%d.%m.%Y %H:%M"
     ).dt.year
     table["has_temp"] = table.index.isin(offered.get("tre200h0", set()))
+    # A summit station looks down on the water rather than standing by it.
+    summit = stations["station_exposition_en"].reindex(table.index) == "crest"
+    table["by_water"] = by_a_shore(table) & ~summit
     return table.sort_values("name")
 
 
@@ -756,12 +766,14 @@ def metar_stations():
     names = table["station_name"].where(
         ~table["station_name"].str.isupper(), table["station_name"].str.title()
     )
-    return pd.DataFrame({
+    table = pd.DataFrame({
         "name": names, "lat": table["lat"], "lon": table["lon"], "height": table["elev"],
         "since": pd.to_datetime(table["begints"]).dt.year,
         # Every METAR carries the air temperature.
         "has_temp": True,
-    }).sort_values("name")
+    })
+    table["by_water"] = by_a_shore(table)
+    return table.sort_values("name")
 
 
 PLACES = data_dir / "places.csv"
@@ -831,6 +843,46 @@ def km_from(latitude, longitude, lats, lons):
     east = np.radians((lons - longitude + 180) % 360 - 180) * np.cos(np.radians(latitude))
     north = np.radians(lats - latitude)
     return np.hypot(east, north) * 6371
+
+
+def coordinates(nested):
+    """Every position in a GeoJSON geometry's coordinates, however deep."""
+    if isinstance(nested[0], (int, float)):
+        yield nested
+    else:
+        for part in nested:
+            yield from coordinates(part)
+
+
+@st.cache_resource(show_spinner="Mapping the world's shores...")
+def shores():
+    """Every point along the world's coasts and lake shores to the nearest
+    hundredth of a degree, about a kilometre, as rows of latitude and
+    longitude sorted by latitude. Built from Natural Earth the first time
+    and kept in data/."""
+    if not SHORES.exists():
+        points = set()
+        for layer in SHORE_LAYERS:
+            response = requests.get(f"{NATURAL_EARTH}/ne_10m_{layer}.geojson", timeout=120)
+            response.raise_for_status()
+            for feature in response.json()["features"]:
+                for lon, lat, *_ in coordinates(feature["geometry"]["coordinates"]):
+                    points.add((round(lat * 100), round(lon * 100)))
+        np.save(SHORES, np.array(sorted(points), dtype=np.int16))
+    return np.load(SHORES) / 100
+
+
+def by_a_shore(stations):
+    """Which stations lie within SHORE_KM of the sea or a lake shore. Each
+    looks only at the shore in its own band of latitude."""
+    points = shores()
+    reach = SHORE_KM / 111  # in degrees of latitude
+    near = []
+    for latitude, longitude in zip(stations["lat"], stations["lon"]):
+        low, high = np.searchsorted(points[:, 0], [latitude - reach, latitude + reach])
+        band = points[low:high]
+        near.append(bool((km_from(latitude, longitude, band[:, 0], band[:, 1]) <= SHORE_KM).any()))
+    return pd.Series(near, index=stations.index)
 
 
 def save_station(spot, target, times, speed, bearing, celsius, credit):
@@ -1589,14 +1641,17 @@ def switch_source():
 
 if st.session_state["spot"] is None:
     saved = downloaded_locations()
-    # The switch sits below the hero it rewrites, so read its value ahead.
+    # The switches sit below the hero they rewrite, so read their values ahead.
     source = st.session_state.get("source_pick") or st.session_state["data_source"]
+    by_water = st.session_state.get("by_water", True)
     stations, stations_error = None, None
     if source != "era5":
         try:
             stations = meteoswiss_stations() if source == "meteoswiss" else metar_stations()
         except Exception as error:
             stations_error = error
+    if stations is not None and by_water:
+        stations = stations[stations["by_water"]]
 
     if source == "metar":
         pitch = (
@@ -1606,7 +1661,8 @@ if st.session_state["spot"] is None:
         facts = [
             ("Hourly", "most since the 1970s"),
             ("Measured", "not modelled"),
-            (f"{len(stations):,}" if stations is not None else "5,000+", "airports"),
+            (f"{len(stations):,}" if stations is not None else "1,400+",
+             "airports by the water" if by_water else "airports"),
         ]
     elif source == "meteoswiss":
         pitch = (
@@ -1618,7 +1674,8 @@ if st.session_state["spot"] is None:
             (f"{stations['since'].min():.0f}" if stations is not None else "1981",
              "first year on record"),
             ("Measured", "not modelled"),
-            (len(stations) if stations is not None else "150+", "stations with wind"),
+            (len(stations) if stations is not None else "25+",
+             "stations by the water" if by_water else "stations with wind"),
         ]
     else:
         pitch = (
@@ -1673,6 +1730,11 @@ if st.session_state["spot"] is None:
                 "Find a station", list(stations.index), index=None, format_func=labels.get,
                 placeholder=f"Search {len(stations):,} stations", key="station_find",
                 width=320,
+            )
+            st.toggle(
+                "By the water only", value=True, key="by_water",
+                help=f"Stations within {SHORE_KM} km of the sea or a lake. Small lakes "
+                "may be missing from the map of shores: switch this off to see them all.",
             )
     if preset and st.session_state.get("preset_applied") != preset:
         st.session_state["preset_applied"] = preset

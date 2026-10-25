@@ -14,6 +14,11 @@ Built with Streamlit on three sources, picked on the start screen:
   most hourly since the 1970s. One report an hour is kept, the one nearest
   the hour; years with only a few reports a day are left out.
 
+The station maps show only stations by the water: within 5 km of the sea or
+a lake, as [Natural Earth](https://www.naturalearthdata.com/) maps the
+shores (public domain), and for MeteoSwiss not on a summit. A switch on the
+start screen shows them all, for lakes too small for Natural Earth.
+
 A spot you have not named is called after the nearest well-known town, from
 [GeoNames](https://www.geonames.org/) (towns of 15,000 people or more,
 CC BY 4.0).
@@ -50,4 +55,6 @@ when the app restarts.
 - `data/metar_<code>.nc` — one airport per file, in that same layout
 - `data/locations.json` — names you have given those cells
 - `data/places.csv` — GeoNames towns, to name the cells you have not
+- `data/shores.npy` — every coast and lake shore point, to the nearest
+  0.01°; the app builds it from Natural Earth when it is missing
 - `.streamlit/config.toml` — theme
