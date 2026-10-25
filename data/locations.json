@@ -44,8 +44,8 @@
   "+36.00_-5.75": {
     "lat": 36.0,
     "lon": -5.75,
-    "name": "+36.00, -5.75",
-    "zone": "Europe/Madrid"
+    "zone": "Europe/Madrid",
+    "name": "26 km N of Tangier, Morocco"
   },
   "station_QUI": {
     "lat": 47.128739,
@@ -62,5 +62,38 @@
     "name": "Vals",
     "station": "VLS",
     "height": 1242.0
+  },
+  "+35.50_-5.75": {
+    "lat": 35.5,
+    "lon": -5.75,
+    "zone": "Africa/Casablanca",
+    "name": "+35.50, -5.75"
+  },
+  "+16.00_-61.00": {
+    "lat": 16.0,
+    "lon": -61.0,
+    "zone": "America/Guadeloupe",
+    "name": "62 km SE of Les Abymes, Guadeloupe"
+  },
+  "+14.75_-60.25": {
+    "lat": 14.75,
+    "lon": -60.25,
+    "zone": "Etc/GMT+4",
+    "name": "+14.75, -60.25"
+  },
+  "-57.00_-67.25": {
+    "lat": -57.0,
+    "lon": -67.25,
+    "zone": "Etc/GMT+4",
+    "name": "252 km S of Ushuaia, Argentina"
+  },
+  "metar_LEPA": {
+    "lat": 39.56083,
+    "lon": 2.73667,
+    "zone": "Europe/Madrid",
+    "source": "metar",
+    "station": "LEPA",
+    "height": 8.0,
+    "name": "Palma de Mallorca"
   }
 }
