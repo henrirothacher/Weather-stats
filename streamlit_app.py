@@ -1,6 +1,9 @@
+import base64
 import calendar
+import html
 import io
 import json
+import re
 import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -28,20 +31,59 @@ st.set_page_config(
 # Goes up by 0.1 with every commit pushed to GitHub (2.9 -> 3.0).
 APP_VERSION = "2.3"
 
+def svg_image(markup, view_box, css_class=""):
+    """A drawing for st.html. Its sanitiser drops <svg> outright but lets an
+    image through, so the drawing goes in as one. CSS cannot reach inside an
+    image, so the markup carries its own colours."""
+    drawing = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{view_box}">{markup}</svg>'
+    data = base64.b64encode(drawing.encode()).decode()
+    return f'<img class="{css_class}" src="data:image/svg+xml;base64,{data}" alt="">'
+
+
+# The mark: three gusts, cool to warm like the wind bands on the charts.
+# Drawn rather than an emoji, which some systems render as a stray glyph.
+# The gradient is in page units: a straight stroke has no height to stretch
+# a box-relative one over, and would vanish.
+LOGO = svg_image(
+    '<defs><linearGradient id="tint" gradientUnits="userSpaceOnUse" '
+    'x1="3" y1="4" x2="29" y2="26">'
+    '<stop offset="0" stop-color="#8ecae6"/><stop offset=".55" stop-color="#ffb703"/>'
+    '<stop offset="1" stop-color="#fb8500"/></linearGradient></defs>'
+    '<g fill="none" stroke="url(#tint)" stroke-width="2.6" stroke-linecap="round">'
+    '<path d="M3 11h15.5a3.5 3.5 0 1 0-3.5-3.5"/>'
+    '<path d="M3 17h22a3.5 3.5 0 1 1-3.5 3.5"/>'
+    '<path d="M3 23h10"/></g>',
+    "0 0 32 32", "mark-icon",
+)
+
 st.html(
     """
     <style>
-    .app-masthead {
-        display: flex; align-items: baseline; gap: .65rem; flex-wrap: wrap;
-        padding: .5rem 0 .1rem;
+    /* One bar across the top of every screen: the mark, and inside a spot
+       the way back. Streamlit's deploy button has no place in a finished app. */
+    [data-testid="stAppDeployButton"] { display: none; }
+    [data-testid="stMainBlockContainer"] { padding-top: 3.8rem; }
+    /* Wide screens get used: narrower margins than Streamlit's own. */
+    @media (min-width: 1000px) {
+        [data-testid="stMainBlockContainer"] { padding-left: 3rem; padding-right: 3rem; }
     }
+    .st-key-topbar {
+        padding-bottom: .75rem; margin-bottom: .35rem;
+        border-bottom: 1px solid rgba(38, 51, 63, .85);
+    }
+    .app-masthead { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+    .app-masthead .mark-icon { width: 30px; height: 30px; flex: none; }
     .app-masthead .mark {
-        font-size: 1.6rem; font-weight: 800; letter-spacing: -.02em;
-        background: linear-gradient(90deg, #8ecae6, #ffb703 55%, #fb8500);
-        -webkit-background-clip: text; background-clip: text;
-        -webkit-text-fill-color: transparent;
+        font-size: 1.3rem; font-weight: 800; letter-spacing: -.025em; color: #e8eef5;
     }
-    .app-masthead .tag { font-size: .82rem; opacity: .55; }
+    .app-masthead .tag {
+        font-size: .8rem; color: #8b98a5; padding-left: .7rem; margin-left: .1rem;
+        border-left: 1px solid #26333f;
+    }
+    @media (max-width: 640px) { .app-masthead .tag { display: none; } }
+    .st-key-nav button {
+        border-radius: 999px; min-height: 2.15rem; padding: .2rem .95rem; font-size: .86rem;
+    }
     /* Pinned to the window, so it stays put on every screen and scroll. */
     .app-version {
         position: fixed; right: .9rem; bottom: .7rem; z-index: 999;
@@ -49,12 +91,7 @@ st.html(
         color: #8b98a5; pointer-events: none;
     }
     </style>
-    <div class="app-masthead">
-        <span class="mark">🌬️ Wind Atlas</span>
-        <span class="tag">Eighty years of hourly wind, anywhere you sail</span>
-    </div>
     """
-    f'<div class="app-version">v{APP_VERSION}</div>'
 )
 
 # --- House styles: motion, heroes, cards --------------------------------
@@ -90,14 +127,26 @@ st.html(
     [data-testid="stImage"],
     [data-testid="stDeckGlJsonChart"] { animation: sweepIn .55s ease both; }
 
-    /* Bordered cards lift slightly under the pointer. */
-    [data-testid="stVerticalBlockBorderWrapper"] {
-        transition: transform .18s ease, box-shadow .18s ease;
+    /* Figures as cards: a quiet label over a large, even-width value. */
+    [data-testid="stMetric"] {
+        background: linear-gradient(180deg, #111922, #0d131a);
     }
-    [data-testid="stVerticalBlockBorderWrapper"]:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 10px 26px rgba(0, 0, 0, .18);
+    [data-testid="stMetricLabel"] p { font-size: .84rem; font-weight: 600; color: #a9b6c3; }
+    [data-testid="stMetricValue"] {
+        font-size: clamp(1.4rem, 2.1vw, 2rem); font-weight: 700;
+        letter-spacing: -.02em; font-variant-numeric: tabular-nums;
     }
+
+    /* The one button that moves you on. */
+    [data-testid="stBaseButton-primary"] {
+        background: linear-gradient(90deg, #fb8500, #ffa31a); border: 0;
+        color: #0b0f14; font-weight: 700;
+        box-shadow: 0 6px 18px rgba(251, 133, 0, .22);
+    }
+    [data-testid="stBaseButton-primary"]:hover {
+        background: linear-gradient(90deg, #ff9a1f, #ffb703); color: #0b0f14;
+    }
+    [data-testid="stBaseButton-primary"] p { font-weight: 700; }
 
     /* Progress meters glide to their value instead of jumping. */
     [data-testid="stProgress"] div[role="progressbar"] > div {
@@ -135,10 +184,14 @@ st.html(
         font-weight: 600; margin-bottom: .3rem; color: #fb8500; opacity: .9;
     }
     .stat-strip {
-        display: flex; gap: 1.6rem; flex-wrap: wrap; opacity: .8;
-        font-size: .86rem; margin-top: .55rem;
+        display: flex; gap: .45rem; flex-wrap: wrap;
+        font-size: .82rem; margin-top: .7rem; color: #a9b6c3;
     }
-    .stat-strip b { font-weight: 600; opacity: 1; color: #8ecae6; }
+    .stat-strip span {
+        border: 1px solid #26333f; border-radius: 999px; background: #0f161e;
+        padding: .28rem .75rem;
+    }
+    .stat-strip b { font-weight: 600; color: #8ecae6; }
 
     /* Wind drifting across the hero. */
     @keyframes drift {
@@ -302,8 +355,199 @@ st.html(
         background: linear-gradient(90deg, #fb8500, #ffb703 32%, #8ecae6 68%, transparent);
         animation: sweepIn .7s ease both;
     }
+
+    /* Numbered steps on the spot screen, the same badges as the landing's. */
+    .step-label {
+        display: flex; align-items: center; gap: .6rem;
+        font-size: 1.02rem; font-weight: 700; color: #e8eef5; margin: .1rem 0 .15rem;
+    }
+    .step-label b {
+        display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; flex: none;
+        border: 1px solid #26333f; border-radius: 4px; background: #141c25;
+        color: #ffb703; font-size: .78rem;
+    }
+    .st-key-activity_pick button { min-height: 2.6rem; padding: 0 1.05rem; }
+    /* All four sports on one line on a phone, wrapping only if that fails. */
+    .st-key-activity_pick [data-testid="stButtonGroup"] > div:last-child { flex-wrap: wrap; }
+    @media (max-width: 640px) { .st-key-activity_pick button { padding: 0 .6rem; } }
+    /* Step 1 is done by the time you are here: your spot. */
+    .spot-eyebrow { display: flex; align-items: center; gap: .55rem; }
+    .spot-eyebrow b {
+        display: inline-grid; place-items: center; width: 1.35rem; height: 1.35rem;
+        border: 1px solid rgba(251, 133, 0, .55); border-radius: 4px;
+        font-size: .68rem; letter-spacing: 0;
+    }
+    /* Arriving draws the rule in (see START_BUILD_CSS); nothing else moves it. */
+    .spot-hero .accent-rule { animation: none; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes bandGrow { from { transform: scaleX(0); } to { transform: none; } }
+
+    /* The sport's range on a knot ruler. It grows into place each time. */
+    .groove { margin: .35rem 0 0; padding-top: 1.3rem; }
+    .groove-track, .groove-scale { max-width: 440px; }
+    .groove-track { position: relative; height: 6px; border-radius: 3px; background: #17212b; }
+    .groove-track::before {
+        content: ""; position: absolute; inset: -3px 0; border-right: 1px solid #2b3a48;
+        background: repeating-linear-gradient(90deg, #2b3a48 0 1px, transparent 1px 12.5%);
+    }
+    .groove-band {
+        position: absolute; top: -1px; bottom: -1px; border-radius: 4px;
+        background: linear-gradient(90deg, #ffb703, #fb8500);
+        box-shadow: 0 0 0 3px rgba(251, 133, 0, .14);
+        transform-origin: left center;
+        animation: bandGrow .65s cubic-bezier(.2, .7, .3, 1) both;
+    }
+    .groove em {
+        position: absolute; bottom: calc(100% + 7px); transform: translateX(-50%);
+        font-style: normal; font-size: .76rem; font-weight: 700; color: #e8eef5;
+        white-space: nowrap; animation: fadeIn .3s ease .45s both;
+    }
+    .groove-scale { position: relative; height: .9rem; margin-top: .45rem; }
+    .groove-scale span {
+        position: absolute; transform: translateX(-50%);
+        font-size: .66rem; color: #5b6b7a; font-variant-numeric: tabular-nums;
+    }
+    .groove-note { font-size: .86rem; color: #8b98a5; margin-top: .55rem; }
+
+    /* The two ways in. Each is drawn as a small instrument that idles cool
+       and warms under the pointer, cool to warm like the wind bands. The
+       whole card is the button: its label sits along the bottom edge.
+       Registered as colours so they fade rather than jump; "\\3c" is "<",
+       spelt out because the sanitiser drops a block holding "<" and a letter. */
+    @property --tone { syntax: "\\3c color>"; inherits: true; initial-value: #3f6b84; }
+    @property --glow { syntax: "\\3c color>"; inherits: true; initial-value: #8ecae6; }
+    [data-testid="stLayoutWrapper"]:has(> [class*="st-key-choice_"]) { flex: 1 1 auto; }
+    [class*="st-key-choice_"] {
+        position: relative; overflow: hidden;
+        padding: 0 0 5.4rem !important; background: #0d1319;
+        border: 1px solid #26333f !important; border-radius: 8px !important;
+        transition: border-color .3s ease, --tone .35s ease, --glow .35s ease;
+    }
+    [class*="st-key-choice_"]:hover:not(:has(button:disabled)) {
+        --tone: #fb8500; --glow: #ffb703; border-color: rgba(251, 133, 0, .6) !important;
+    }
+    [class*="st-key-choice_"]:has(button:focus-visible) {
+        border-color: #fb8500 !important; box-shadow: 0 0 0 1px #fb8500;
+    }
+    /* The cards fill the screen: each drawing scaled up as a whole. */
+    .choice-face {
+        height: 200px; display: flex; align-items: center; justify-content: center;
+        gap: 1.5rem; background: #0a0f14; border-bottom: 1px solid #1a2430;
+    }
+    .choice-face > * { zoom: 1.35; }
+    .choice-text { padding: 1.4rem 1.6rem 0; }
+    .choice-kicker {
+        font-size: .74rem; font-weight: 700; letter-spacing: .16em;
+        text-transform: uppercase; color: #8b98a5;
+    }
+    .choice-title {
+        font-size: 1.8rem; font-weight: 800; letter-spacing: -.025em;
+        color: #e8eef5; margin-top: .35rem;
+    }
+    .choice-blurb { font-size: 1.04rem; line-height: 1.55; color: #a9b6c3; margin-top: .4rem; }
+    .choice-lock { font-size: .82rem; font-weight: 600; color: #ffb703; margin-top: .55rem; }
+    [class*="st-key-choice_"] [class*="st-key-pick_"] {
+        position: absolute; inset: 0; z-index: 2; width: auto !important;
+    }
+    [class*="st-key-choice_"] [class*="st-key-pick_"] .stButton,
+    [class*="st-key-choice_"] [class*="st-key-pick_"] button { width: 100%; height: 100%; }
+    [class*="st-key-choice_"] [class*="st-key-pick_"] button {
+        display: flex; align-items: flex-end; padding: 0 1.6rem 1.3rem;
+        background: transparent !important; border: 0 !important; border-radius: 0;
+        box-shadow: none !important;
+    }
+    [class*="st-key-choice_"] [class*="st-key-pick_"] button > div,
+    [class*="st-key-choice_"] [class*="st-key-pick_"] button > div > span,
+    [class*="st-key-choice_"] [class*="st-key-pick_"] [data-testid="stMarkdownContainer"] {
+        width: 100%;
+    }
+    [class*="st-key-choice_"] [class*="st-key-pick_"] button p {
+        display: flex; justify-content: space-between; align-items: center;
+        padding-top: 1rem; border-top: 1px solid #1f2b37;
+        font-size: 1.02rem; font-weight: 700; color: #e8eef5; transition: color .25s ease;
+    }
+    [class*="st-key-choice_"] [class*="st-key-pick_"] button p::after {
+        content: "→"; font-size: 1.05rem; color: #5b6b7a;
+        transition: transform .25s ease, color .25s ease;
+    }
+    [class*="st-key-choice_"]:hover [class*="st-key-pick_"] button:not(:disabled) p { color: #fb8500; }
+    [class*="st-key-choice_"]:hover [class*="st-key-pick_"] button:not(:disabled) p::after {
+        color: #fb8500; transform: translateX(5px);
+    }
+    [class*="st-key-choice_"] button:disabled { cursor: not-allowed; }
+    [class*="st-key-choice_"] button:disabled p { color: #5b6b7a !important; }
+    [class*="st-key-choice_"]:has(button:disabled) .choice-face { opacity: .35; }
+    [class*="st-key-choice_"]:has(button:disabled) :is(.dial-needle > span, .grid i) {
+        animation-play-state: paused;
+    }
+
+    /* Rate: a meter from 0 to 10 whose needle hunts and never settles. */
+    /* Ticks every 22 degrees round a 220 degree arc, 0 bottom left. */
+    .dial { position: relative; width: 150px; height: 108px; flex: none; }
+    .dial i {
+        position: absolute; left: calc(50% - 1px); bottom: 30px;
+        width: 2px; height: 8px; border-radius: 1px; transform-origin: 50% 100%;
+        transform: rotate(calc(var(--n) * 22deg - 110deg)) translateY(-62px);
+        background: color-mix(in srgb, var(--tone) 60%, #1a2430);
+    }
+    .dial i:nth-of-type(5n+1) { height: 13px; background: var(--glow); }
+    .dial-needle { position: absolute; left: calc(50% - 1.5px); bottom: 30px; width: 3px; height: 54px; }
+    .dial-needle > span {
+        display: block; height: 100%; border-radius: 3px; transform-origin: 50% 100%;
+        transform: rotate(-110deg);
+        background: linear-gradient(to top, var(--tone), var(--glow));
+        animation: needleHunt 6.5s ease-in-out infinite;
+    }
+    .dial::after {
+        content: ""; position: absolute; left: calc(50% - 6px); bottom: 24px;
+        width: 12px; height: 12px; border-radius: 50%; box-sizing: border-box;
+        background: #0a0f14; border: 2px solid var(--glow);
+    }
+    @keyframes needleHunt {
+        0%, 100% { transform: rotate(-110deg); }
+        26%      { transform: rotate(40deg); }
+        38%      { transform: rotate(14deg); }
+        60%      { transform: rotate(88deg); }
+        78%      { transform: rotate(-30deg); }
+    }
+    .dial-read { display: flex; flex-direction: column; line-height: 1; }
+    .dial-read b { font-size: 2.7rem; font-weight: 800; letter-spacing: -.04em; color: var(--glow); }
+    .dial-read small {
+        margin-top: .35rem; font-size: .66rem; font-weight: 600; letter-spacing: .14em;
+        text-transform: uppercase; color: #8b98a5;
+    }
+
+    /* Explore: a month-by-hour grid with a wash passing over it. */
+    .grid { display: flex; gap: 3px; }
+    .grid > span { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+    .grid i {
+        width: 10px; height: 10px; border-radius: 2px; background: #17212b;
+        animation: cellWash 4s ease-in-out infinite;
+        animation-delay: calc(var(--c) * .12s + var(--r) * .08s - 4s);
+    }
+    .grid small {
+        font-size: .62rem; font-weight: 600; line-height: 1; color: #5b6b7a;
+    }
+    .grid small { margin-top: 3px; }
+    @keyframes cellWash {
+        0%, 46%, 100% { background: #17212b; }
+        18%           { background: var(--tone); }
+        28%           { background: color-mix(in srgb, var(--tone) 55%, #17212b); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .dial-needle > span, .grid i { animation: none; }
+    }
     </style>
     """
+)
+
+# One bar across the top of every screen. Inside a spot the way back joins it.
+topbar = st.container(horizontal=True, vertical_alignment="center", key="topbar")
+topbar.html(
+    f'<div class="app-masthead">{LOGO}<span class="mark">Wind Atlas</span>'
+    '<span class="tag">Eighty years of hourly wind, anywhere you sail</span></div>'
+    f'<div class="app-version">v{APP_VERSION}</div>'
 )
 
 MS_TO_KNOTS = 1.9438444924406046
@@ -344,17 +588,10 @@ PRESETS = {
 # Top of the wind slider in explore, in knots.
 WIND_TOP = 50
 LOOKBACK = {"10 years": 10, "20 years": 20, "All": None}
-# Explore's charts. Brand orange and blue, each stepped to sit inside the
-# dark-mode lightness band and stay apart under colour blindness (checked
-# in OKLab against the app background).
-GOOD_COLOR = "#e37100"   # wind and air both right
-COLD_COLOR = "#2b8bc4"   # the wind is there, the warmth is not
-MISS_COLOR = "#26333f"   # a day that did not have it: there, but quiet
-# One hue, near-ground to bright: how often, on a dark background.
-CHANCE_RAMP = ["#1f1710", "#4d2c0c", "#8a4a06", "#e37100", "#ffad5c"]
-WATER_SHADE = "#8b98a5"
-SURFACE = "#0a0e13"   # the app background, for gaps between marks
-
+# Where the settings start, before you change anything.
+DEFAULT_HOURS = (10, 17)
+DEFAULT_LASTING = 2
+DEFAULT_YEARS = "20 years"
 THRESHOLD_COLORS = ["#8ecae6", "#ffb703", "#fb8500", "#9d0208"]
 
 COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
@@ -374,10 +611,17 @@ SOURCES = {
     "era5": ":material/public: ERA5 · worldwide",
     "meteoswiss": ":material/sensors: MeteoSwiss · Swiss stations",
 }
+# Each kind of station: what to call it, and the prefix of its file in data/.
+STATION_NAMES = {"meteoswiss": "MeteoSwiss"}
+STATION_FILES = {"meteoswiss": "station"}
 # MeteoSwiss open data: free, no account, semicolon CSV per station.
 OGD_ROOT = "https://data.geo.admin.ch/ch.meteoschweiz.ogd-smn"
 OGD_ITEMS = "https://data.geo.admin.ch/api/stac/v1/collections/ch.meteoschweiz.ogd-smn/items"
+# Where a station map opens before you pick one, and how many of the
+# stations around what it looks at it draws.
 SWISS_CENTRE = (46.8, 8.2)
+STATION_ZOOM = {"meteoswiss": 8}
+NEARBY_STATIONS = 200
 
 
 def cds_client():
@@ -407,14 +651,17 @@ def timezone_at(latitude, longitude):
     return zone or "UTC"
 
 
-def dataset_for(latitude, longitude):
-    """One cached netCDF per grid cell."""
-    return data_dir / f"wind_{latitude:+.2f}_{longitude:+.2f}.nc"
+def spot_key(spot):
+    """Registry key: the grid cell for ERA5, the file name for a station."""
+    if spot.get("station"):
+        return f"{STATION_FILES[spot['source']]}_{spot['station']}"
+    return f"{spot['lat']:+.2f}_{spot['lon']:+.2f}"
 
 
-def station_dataset(abbr):
-    """One cached netCDF per MeteoSwiss station."""
-    return data_dir / f"station_{abbr}.nc"
+def spot_path(spot):
+    """One cached netCDF per grid cell or station."""
+    key = spot_key(spot)
+    return data_dir / (f"{key}.nc" if spot.get("station") else f"wind_{key}.nc")
 
 
 def ogd_csv(url, **options):
@@ -449,20 +696,101 @@ def meteoswiss_stations():
     return table.sort_values("name")
 
 
-def nearest_station(stations, latitude, longitude):
-    """The station closest to a click, and how far away it is in km."""
-    # A flat projection is plenty across a country this size.
-    east = np.radians(stations["lon"] - longitude) * np.cos(np.radians(latitude))
-    north = np.radians(stations["lat"] - latitude)
-    km = np.hypot(east, north) * 6371
-    abbr = km.idxmin()
-    return abbr, float(km[abbr])
+PLACES = data_dir / "places.csv"
+
+
+@st.cache_resource(show_spinner=False)
+def town_table():
+    """GeoNames towns of 15,000 people or more (CC BY 4.0): the table, then
+    each town's position in radians and its size as a power of ten. Read
+    without NA handling, or Namibia and a town called Nan would go missing."""
+    towns = pd.read_csv(PLACES, keep_default_na=False)
+    return (towns, np.radians(towns["lat"].to_numpy()), np.radians(towns["lon"].to_numpy()),
+            np.log10(towns["pop"].clip(lower=1).to_numpy()))
+
+
+@st.cache_data(show_spinner=False)
+def place_name(latitude, longitude):
+    """Where a point is, as people would say it: 'Zürich, Switzerland' in a
+    town, '33 km E of Valencia, Spain' near one. Within 250 km a big town is
+    worth going a little further for than a small one (ten times the people
+    for each 40 km); past that, the nearest of any size."""
+    if not PLACES.exists():
+        return coords_label(latitude, longitude)
+    towns, lat, lon, size = town_table()
+    here, east = np.radians(latitude), np.radians(longitude)
+    km = 2 * 6371 * np.arcsin(np.sqrt(
+        np.sin((lat - here) / 2) ** 2 + np.cos(here) * np.cos(lat) * np.sin((lon - east) / 2) ** 2
+    ))
+    near = km < 250
+    index = int(np.argmax(np.where(near, size - km / 40, -np.inf)) if near.any() else np.argmin(km))
+    town = towns.iloc[index]
+    where = f"{town['name']}, {town['country']}"
+    if km[index] < 10:
+        return where
+    # Which way the point lies from the town, on eight points of the compass.
+    bearing = np.degrees(np.arctan2(
+        np.sin(east - lon[index]) * np.cos(here),
+        np.cos(lat[index]) * np.sin(here)
+        - np.sin(lat[index]) * np.cos(here) * np.cos(east - lon[index]),
+    ))
+    return f"{km[index]:,.0f} km {COMPASS[::2][round(bearing % 360 / 45) % 8]} of {where}"
+
+
+def spot_title(spot):
+    """A spot's name, or where it is when its name is only its coordinates,
+    which is what a spot nobody named is called."""
+    name = spot["name"]
+    if re.fullmatch(r"[+-]?\d+(\.\d+)?, *[+-]?\d+(\.\d+)?", name.strip()):
+        return place_name(float(spot["lat"]), float(spot["lon"]))
+    return name
+
+
+def km_from(latitude, longitude, lats, lons):
+    """How far each of many points is from one, in km."""
+    # A flat projection around the point is plenty to tell near from far;
+    # the longitude wraps so the date line is no wall.
+    east = np.radians((lons - longitude + 180) % 360 - 180) * np.cos(np.radians(latitude))
+    north = np.radians(lats - latitude)
+    return np.hypot(east, north) * 6371
+
+
+def save_station(spot, target, times, speed, bearing, celsius, credit):
+    """A station's hourly readings stored in the layout of an ERA5 download,
+    so everything downstream reads both. `speed` is in m/s, `bearing` where
+    the wind comes from in degrees, `celsius` the air, if recorded."""
+    # Stations report speed and where the wind comes from; ERA5 gives the
+    # eastward and northward parts. Convert so the two read the same.
+    speed = speed.to_numpy(dtype="float32")
+    bearing = np.radians(bearing.to_numpy(dtype="float32"))
+    data = {
+        "u10": ("valid_time", -speed * np.sin(bearing)),
+        "v10": ("valid_time", -speed * np.cos(bearing)),
+    }
+    if celsius is not None and celsius.notna().any():
+        # Kelvin, as ERA5 stores it.
+        data["t2m"] = ("valid_time", celsius.to_numpy(dtype="float32") + 273.15)
+
+    # The file carries its own station details, so it lists properly even
+    # without data/locations.json.
+    dataset = xr.Dataset(
+        data,
+        coords={"valid_time": times.to_numpy(dtype="datetime64[ns]")},
+        attrs={
+            "source": credit, "station": spot["station"], "name": spot["name"],
+            "lat": float(spot["lat"]), "lon": float(spot["lon"]),
+            "height": float(spot["height"]),
+        },
+    )
+    partial = target.with_suffix(".part")
+    dataset.to_netcdf(partial)
+    partial.replace(target)
+    return target
 
 
 def fetch_station(spot, target, progress=None):
     """Every hourly file MeteoSwiss holds for a station (one per decade, plus
-    this year up to yesterday) joined into one record. Stored in the same
-    layout as an ERA5 download, so everything downstream reads both.
+    this year up to yesterday) joined into one record.
     `progress(done, total)` hears about each file as it lands."""
     item = requests.get(f"{OGD_ITEMS}/{spot['station'].lower()}", timeout=60)
     item.raise_for_status()
@@ -499,48 +827,23 @@ def fetch_station(spot, target, progress=None):
     )
     if frame.empty:
         raise RuntimeError("This station has no wind readings yet")
-
-    # Stations report speed and where the wind comes from; ERA5 gives the
-    # eastward and northward parts. Convert so the two read the same.
-    speed = frame["fkl010h0"].to_numpy(dtype="float32")
-    bearing = np.radians(frame["dkl010h0"].to_numpy(dtype="float32"))
-    data = {
-        "u10": ("valid_time", -speed * np.sin(bearing)),
-        "v10": ("valid_time", -speed * np.cos(bearing)),
-    }
-    if "tre200h0" in frame and frame["tre200h0"].notna().any():
-        # Kelvin, as ERA5 stores it.
-        data["t2m"] = ("valid_time", frame["tre200h0"].to_numpy(dtype="float32") + 273.15)
-
-    # The file carries its own station details, so it lists properly even
-    # without data/locations.json.
-    dataset = xr.Dataset(
-        data,
-        coords={"valid_time": frame["time"].to_numpy(dtype="datetime64[ns]")},
-        attrs={
-            "source": "MeteoSwiss SwissMetNet (CC BY 4.0)",
-            "station": spot["station"], "name": spot["name"],
-            "lat": float(spot["lat"]), "lon": float(spot["lon"]),
-            "height": float(spot["height"]),
-        },
+    return save_station(
+        spot, target, frame["time"], frame["fkl010h0"], frame["dkl010h0"],
+        frame.get("tre200h0"), "MeteoSwiss SwissMetNet (CC BY 4.0)",
     )
-    partial = target.with_suffix(".part")
-    dataset.to_netcdf(partial)
-    partial.replace(target)
-    return target
+
+
+def source_credit(spot):
+    """Where a spot's wind comes from, for the small print."""
+    if spot.get("station"):
+        return f"{STATION_NAMES[spot['source']]} station {spot['station']}"
+    return "ERA5 reanalysis"
 
 
 def can_score(activity):
     """A range that starts at 0 kt counts every day as sailable, so a score
     would say nothing about the spot — such a choice is for exploring only."""
     return ACTIVITIES[activity]["groove"][0] > 0
-
-
-def spot_key(spot):
-    """Registry key: the grid cell for ERA5, the station code for MeteoSwiss."""
-    if spot.get("station"):
-        return f"station_{spot['station']}"
-    return f"{spot['lat']:+.2f}_{spot['lon']:+.2f}"
 
 
 def remember_location(spot):
@@ -576,18 +879,19 @@ def downloaded_locations():
                 "zone": timezone_at(latitude, longitude),
             }
         found[key] = {**entry, "path": path}
-    for path in sorted(data_dir.glob("station_*.nc")):
-        entry = registry.get(path.stem)
-        if entry is None:
-            with xr.open_dataset(path) as ds:
-                details = ds.attrs
-                entry = {
-                    "lat": float(details["lat"]), "lon": float(details["lon"]),
-                    "name": str(details["name"]), "station": str(details["station"]),
-                    "height": float(details["height"]),
-                }
-            entry["zone"] = timezone_at(entry["lat"], entry["lon"])
-        found[path.stem] = {**entry, "path": path}
+    for source, prefix in STATION_FILES.items():
+        for path in sorted(data_dir.glob(f"{prefix}_*.nc")):
+            entry = registry.get(path.stem)
+            if entry is None:
+                with xr.open_dataset(path) as ds:
+                    details = ds.attrs
+                    entry = {
+                        "lat": float(details["lat"]), "lon": float(details["lon"]),
+                        "name": str(details["name"]), "station": str(details["station"]),
+                        "height": float(details["height"]),
+                    }
+                entry["zone"] = timezone_at(entry["lat"], entry["lon"])
+            found[path.stem] = {**entry, "source": source, "path": path}
     return found
 
 
@@ -735,19 +1039,37 @@ def pick(value, fallback):
     return fallback if value is None else value
 
 
-def sticky(key, default):
-    """A widget key whose value outlives the views that hide the widget.
+def remembered(widget, label, *args, key, default, start="value", memory=None, **options):
+    """Draw a widget whose choice outlives the views that hide it.
+
     Streamlit forgets a widget's state once it is not drawn, so the value is
-    copied aside every run and put back before the widget is drawn again."""
-    if key not in st.session_state:
-        st.session_state[key] = st.session_state.get(f"kept_{key}", default)
-    st.session_state[f"kept_{key}"] = st.session_state[key]
-    return key
+    copied aside every run and handed back as the widget's own starting value
+    (`start` names that argument). Not put back through session state: a
+    widget drawn from there alone shows its blank default, and a range slider
+    even falls back to its full span and then reports that span back.
+    `memory` lets two widgets share one value; an emptied choice keeps it."""
+    memory = memory or f"kept_{key}"
+    kept_value = st.session_state.get(memory, default)
+    value = widget(label, *args, key=key, **{start: kept_value}, **options)
+    if value is None:
+        value = kept_value
+    st.session_state[memory] = value
+    return value
 
 
-def percent(value):
-    """A share as people say it: a chance that is not quite zero is not 0%."""
-    return "<1%" if 0 < value < 0.5 else f"{value:.0f}%"
+def kept(key, default):
+    """A remembered setting's value on a screen that does not draw its widget.
+    Read from the copy remembered() keeps, never from the widget's own state,
+    which a redrawn widget can leave empty."""
+    return st.session_state.get(f"kept_{key}", default)
+
+
+def wind_words(wind):
+    """6–25 kn, 15+ kn or up to 12 kn: a wind range as a sailor says it."""
+    low, high = wind
+    if high >= WIND_TOP:
+        return f"{low}+ kn"
+    return f"up to {high} kn" if low == 0 else f"{low}–{high} kn"
 
 
 def sessions_mask(index, windows):
@@ -758,74 +1080,6 @@ def sessions_mask(index, windows):
     for window in windows:
         combined |= hour_mask(index, window)
     return combined
-
-
-# A window of dates is ((month, day), (month, day)) and holds in every year:
-# 1–15 June is ((6, 1), (6, 15)). None is the whole year.
-
-def in_dates(index, dates):
-    """True on the calendar days inside the window, whatever the year. One
-    that runs past New Year, 20 Dec to 10 Jan, wraps round."""
-    if dates is None:
-        return np.ones(len(index), dtype=bool)
-    stamp = np.asarray(index.month * 100 + index.day)
-    start, end = (month * 100 + day for month, day in dates)
-    if start <= end:
-        return (stamp >= start) & (stamp <= end)
-    return (stamp >= start) | (stamp <= end)
-
-
-def window_year(index, dates):
-    """The year each day's window opened in, so 20 Dec – 10 Jan is one window."""
-    years = np.asarray(index.year)
-    if dates is None or dates[0] <= dates[1]:
-        return years
-    return years - (np.asarray(index.month * 100 + index.day) < dates[0][0] * 100 + dates[0][1])
-
-
-def window_days(dates):
-    """Every calendar day of the window in order, as (month, day). 29 Feb is
-    left out: it comes round one year in four, too seldom to chart."""
-    common = pd.date_range("2001-01-01", "2001-12-31")
-    pairs = [(int(month), int(day)) for month, day in zip(common.month, common.day)]
-    start, end = pairs.index(dates[0]), pairs.index(dates[1])
-    return pairs[start:end + 1] if start <= end else pairs[start:] + pairs[:end + 1]
-
-
-def axis_dates(months, days_of_month, dates):
-    """Where each calendar day sits on the window's time axis: in 2001, or in
-    2002 once the window has run past New Year. 29 Feb must be out already."""
-    months, days_of_month = np.asarray(months), np.asarray(days_of_month)
-    wrapped = (months * 100 + days_of_month < dates[0][0] * 100 + dates[0][1]) & (dates[0] > dates[1])
-    return pd.to_datetime(
-        pd.DataFrame({"year": 2001 + wrapped, "month": months, "day": days_of_month})
-    )
-
-
-def dates_label(dates):
-    """1–15 June, or 28 May – 10 June across a month end."""
-    (first_month, first_day), (last_month, last_day) = dates
-    first, last = calendar.month_name[first_month], calendar.month_name[last_month]
-    if dates[0] == dates[1]:
-        return f"{first_day} {first}"
-    if first_month == last_month and first_day < last_day:
-        return f"{first_day}–{last_day} {first}"
-    return f"{first_day} {first} – {last_day} {last}"
-
-
-def as_dates(picked):
-    """The range from the date picker as a window, or None for a year or more.
-    With only the first end picked so far, that one day is the window."""
-    if not picked:
-        return None
-    start, end = picked[0], picked[-1]
-    if (end - start).days >= 365:
-        return None
-    # Not every year has a 29 Feb; the 28th stands in for it.
-    return tuple(
-        (2, 28) if (day.month, day.day) == (2, 29) else (day.month, day.day)
-        for day in (start, end)
-    )
 
 
 def lookback_start(frame, years_back):
@@ -1131,12 +1385,40 @@ def enter_spot(spot):
     remember_location(spot)
 
 
+def fresh_click(result, seen_key):
+    """The click just made on a map, or None. A dot catches its click before
+    the map does, so it reports as an object click (counted, so the same dot
+    twice still registers) and open ground as a map click: whichever moved on
+    is the new one. st_folium replays both on every rerun, hence comparing
+    against the clicks already used rather than the current pick, which let
+    a stale click overwrite a preset chosen a moment before."""
+    state = result or {}
+    ground, dot = state.get("last_clicked"), state.get("last_object_clicked")
+    clicks = (
+        (ground["lat"], ground["lng"]) if ground else None,
+        state.get("last_object_clicked_count") or 0,
+    )
+    seen = st.session_state.get(seen_key, (None, 0))
+    if clicks == seen:
+        return None
+    st.session_state[seen_key] = clicks
+    if clicks[1] != seen[1]:
+        return (dot["lat"], dot["lng"]) if dot else None
+    return clicks[0]
+
+
+def switch_source():
+    """A station picked from one source is no station in another."""
+    for key in ("station_pick", "station_find", "station_find_applied", "station_click_km"):
+        st.session_state.pop(key, None)
+
+
 if st.session_state["spot"] is None:
     saved = downloaded_locations()
     # The switch sits below the hero it rewrites, so read its value ahead.
     source = st.session_state.get("source_pick") or st.session_state["data_source"]
     stations, stations_error = None, None
-    if source == "meteoswiss":
+    if source != "era5":
         try:
             stations = meteoswiss_stations()
         except Exception as error:
@@ -1174,12 +1456,11 @@ if st.session_state["spot"] is None:
         '<div class="landing-title">Find where the <span class="wind">wind</span> '
         "really blows</div>"
         f'<div class="landing-sub">{pitch}See how often it is sailable for what you '
-        "ride, in which months, at what time of day — and how it stacks up against "
-        "your other spots.</div>"
+        "ride, in which months and at what time of day.</div>"
         '<div class="landing-steps">'
         "<span><b>1</b>Pick a spot</span>"
         "<span><b>2</b>Choose your sport</span>"
-        "<span><b>3</b>Rate, explore or compare</span>"
+        "<span><b>3</b>Rate it or explore it</span>"
         "</div></div>"
         '<div class="landing-facts">'
         + "".join(f"<div><b>{value}</b><span>{label}</span></div>" for value, label in facts)
@@ -1191,6 +1472,7 @@ if st.session_state["spot"] is None:
         source = st.segmented_control(
             "Data source", list(SOURCES), format_func=SOURCES.get,
             default=st.session_state["data_source"], required=True, key="source_pick",
+            on_change=switch_source,
         )
         st.session_state["data_source"] = source
         if source == "era5":
@@ -1201,10 +1483,10 @@ if st.session_state["spot"] is None:
                 None,
             )
         elif stations is not None:
+            labels = (stations["name"] + " · " + stations.index.to_series()).to_dict()
             found = st.selectbox(
-                "Find a station", list(stations.index), index=None,
-                format_func=lambda abbr: f"{stations.loc[abbr, 'name']} · {abbr}",
-                placeholder=f"Search {len(stations)} stations", key="station_find",
+                "Find a station", list(stations.index), index=None, format_func=labels.get,
+                placeholder=f"Search {len(stations):,} stations", key="station_find",
                 width=320,
             )
     if preset and st.session_state.get("preset_applied") != preset:
@@ -1219,7 +1501,7 @@ if st.session_state["spot"] is None:
         st.session_state["station_recentre"] = True
         st.rerun()
     if stations_error is not None:
-        st.error(f"Could not load the MeteoSwiss stations: {stations_error}")
+        st.error(f"Could not load the {STATION_NAMES[source]} stations: {stations_error}")
         st.stop()
 
     clicked = st.session_state.get("clicked")
@@ -1246,7 +1528,7 @@ if st.session_state["spot"] is None:
             world.get_root().html.add_child(folium.Element(f'<div class="map-hint">{hint}</div>'))
             # Everything already on disk, so the map doubles as your library.
             for entry in saved.values():
-                dot_marker(entry["lat"], entry["lon"], entry["name"]).add_to(world)
+                dot_marker(entry["lat"], entry["lon"], spot_title(entry)).add_to(world)
             if clicked:
                 cell_lat, cell_lon = snap_to_grid(clicked[0]), snap_to_grid(clicked[1])
                 folium.Rectangle(
@@ -1266,73 +1548,51 @@ if st.session_state["spot"] is None:
                 world, height=LANDING_MAP_HEIGHT, use_container_width=True, key="picker",
                 center=list(recentre) if recentre else None,
                 zoom=8 if recentre else None,
-                returned_objects=["last_clicked"],
+                returned_objects=["last_clicked", "last_object_clicked",
+                                  "last_object_clicked_count"],
             )
         else:
             focus = tuple(stations.loc[picked, ["lat", "lon"]]) if picked else SWISS_CENTRE
             world = base_map(
-                location=list(focus), zoom_start=10 if picked else 8,
-                control_scale=True, min_zoom=6,
+                location=list(focus), zoom_start=10 if picked else STATION_ZOOM[source],
+                control_scale=True, min_zoom=2, world_copy_jump=True,
             )
             hint = (
                 "Click another station to switch" if picked
                 else "Click a station, or anywhere for the nearest one"
             )
             world.get_root().html.add_child(folium.Element(f'<div class="map-hint">{hint}</div>'))
-            # Every station is on the map; the ones you have downloaded stand out.
-            on_disk = {entry.get("station") for entry in saved.values()}
-            for abbr, row in stations.iterrows():
+            # The stations nearest where the map looks; the ones you have
+            # downloaded stand out.
+            on_disk = {entry["station"] for entry in saved.values() if entry.get("source") == source}
+            near = km_from(*focus, stations["lat"], stations["lon"]).nsmallest(NEARBY_STATIONS).index
+            for abbr, row in stations.loc[near].iterrows():
                 if abbr != picked:
-                    dot_marker(row["lat"], row["lon"], f"{row['name']} · {abbr}",
+                    dot_marker(row["lat"], row["lon"], labels[abbr],
                                idle=abbr not in on_disk).add_to(world)
             if picked:
-                dot_marker(*focus, f"{stations.loc[picked, 'name']} · {picked}",
-                           picked=True).add_to(world)
+                dot_marker(*focus, labels[picked], picked=True).add_to(world)
 
             recentre = st.session_state.pop("station_recentre", False)
             result = st_folium(
                 world, height=LANDING_MAP_HEIGHT, use_container_width=True,
-                key="station_picker",
+                key=f"{source}_picker",
                 center=list(focus) if recentre else None,
                 zoom=10 if recentre else None,
                 returned_objects=["last_clicked", "last_object_clicked",
                                   "last_object_clicked_count"],
             )
 
-    if source == "era5":
-        latest = None
-        if result and result.get("last_clicked"):
-            latest = (result["last_clicked"]["lat"], result["last_clicked"]["lng"])
-        # st_folium replays its stored click on every rerun, so compare against
-        # the click we last consumed — not against the current selection. Doing
-        # the latter let a stale click overwrite a preset chosen a moment before.
-        if latest is not None and latest != st.session_state.get("click_seen"):
-            st.session_state["click_seen"] = latest
-            st.session_state["clicked"] = latest
-            st.rerun()
-    else:
-        # Same replay problem, with two kinds of click: a dot reports as an
-        # object click (counted, so the same dot twice still registers), open
-        # ground as a map click. Whichever moved on is the click just made.
-        state = result or {}
-        ground = state.get("last_clicked")
-        dot = state.get("last_object_clicked")
-        clicks = (
-            (ground["lat"], ground["lng"]) if ground else None,
-            state.get("last_object_clicked_count") or 0,
-        )
-        seen = st.session_state.get("station_clicks_seen", (None, 0))
-        if clicks != seen:
-            st.session_state["station_clicks_seen"] = clicks
-            if clicks[1] != seen[1]:
-                fresh = (dot["lat"], dot["lng"]) if dot else None
-            else:
-                fresh = clicks[0]
-            if fresh is not None:
-                abbr, km = nearest_station(stations, *fresh)
-                st.session_state["station_pick"] = abbr
-                st.session_state["station_click_km"] = km
-                st.rerun()
+    fresh = fresh_click(result, "click_seen" if source == "era5" else "station_clicks_seen")
+    if fresh is not None and source == "era5":
+        # A dot is one of your spots: its own cell, so it opens as itself.
+        st.session_state["clicked"] = fresh
+        st.rerun()
+    elif fresh is not None:
+        km = km_from(*fresh, stations["lat"], stations["lon"])
+        st.session_state["station_pick"] = km.idxmin()
+        st.session_state["station_click_km"] = float(km.min())
+        st.rerun()
 
     if list_col is not None:
         with list_col:
@@ -1345,21 +1605,21 @@ if st.session_state["spot"] is None:
                 for index, (key, entry) in enumerate(saved.items()):
                     first, last = record_span(entry["path"], entry["path"].stat().st_mtime)
                     if entry.get("station"):
-                        where = f"MeteoSwiss {entry['station']} · {entry['height']:.0f} m"
+                        where = (f"{STATION_NAMES[entry['source']]} {entry['station']} · "
+                                 f"{entry['height']:.0f} m")
                     else:
-                        zone_name = entry["zone"].split("/")[-1].replace("_", " ")
-                        where = f"ERA5 · {coords_label(entry['lat'], entry['lon'])} · {zone_name}"
+                        where = f"ERA5 · {coords_label(entry['lat'], entry['lon'])}"
                     # Keyed by position: the hover script below matches cards to
                     # spots by this number.
                     with st.container(key=f"spot_card_{index}", horizontal=True,
                                       vertical_alignment="center"):
-                        st.markdown(f"**{entry['name']}**  \n:gray[{where} · {first}–{last}]")
+                        st.markdown(f"**{spot_title(entry)}**  \n:gray[{where} · {first}–{last}]")
                         if st.button("Open", key=f"open_{key}",
                                      icon=":material/arrow_forward:", width="content"):
                             enter_spot({k: v for k, v in entry.items() if k != "path"})
                             st.rerun()
         spots = [
-            {"lat": entry["lat"], "lon": entry["lon"], "name": entry["name"]}
+            {"lat": entry["lat"], "lon": entry["lon"], "name": spot_title(entry)}
             for entry in saved.values()
         ]
         # Every "<" escaped, so no spot name can trip the sanitizer (see above).
@@ -1372,7 +1632,7 @@ if st.session_state["spot"] is None:
         raw_lat, raw_lon = clicked
         latitude, longitude = snap_to_grid(raw_lat), snap_to_grid(raw_lon)
         zone = timezone_at(latitude, longitude)
-        cached = dataset_for(latitude, longitude)
+        cached = spot_path({"lat": latitude, "lon": longitude})
 
         with st.container(key="picked_panel"):
             facts_row = st.columns([2, 2, 2, 3], vertical_alignment="center")
@@ -1391,7 +1651,7 @@ if st.session_state["spot"] is None:
                 known = load_registry().get(f"{latitude:+.2f}_{longitude:+.2f}", {})
                 name = st.text_input(
                     "Name this spot",
-                    value=preset or known.get("name") or f"{latitude:+.2f}, {longitude:+.2f}",
+                    value=preset or (spot_title(known) if known else place_name(latitude, longitude)),
                     key=f"name_{latitude:+.2f}_{longitude:+.2f}",
                 )
                 if st.button(":material/arrow_forward: Use this location",
@@ -1401,9 +1661,13 @@ if st.session_state["spot"] is None:
 
     if picked:
         row = stations.loc[picked]
-        zone = timezone_at(row["lat"], row["lon"])
-        cached = station_dataset(picked)
-        where = f"MeteoSwiss station {picked} · {coords_label(row['lat'], row['lon'])}"
+        station = {
+            "lat": float(row["lat"]), "lon": float(row["lon"]),
+            "zone": timezone_at(row["lat"], row["lon"]),
+            "source": source, "station": picked, "height": float(row["height"]),
+        }
+        cached = spot_path(station)
+        where = f"{source_credit(station)} · {coords_label(row['lat'], row['lon'])}"
         km = st.session_state.get("station_click_km")
         if km and km >= 1:
             where += f" · nearest to your click, {km:.0f} km away"
@@ -1424,32 +1688,28 @@ if st.session_state["spot"] is None:
                 "record air temperature.",
             )
             with facts_row[3]:
-                known = load_registry().get(f"station_{picked}", {})
+                known = load_registry().get(spot_key(station), {})
                 name = st.text_input(
                     "Name this spot", value=known.get("name") or row["name"],
-                    key=f"name_station_{picked}",
+                    key=f"name_{spot_key(station)}",
                 )
                 if st.button(":material/arrow_forward: Use this station",
                              type="primary", width="stretch"):
-                    enter_spot({
-                        "lat": float(row["lat"]), "lon": float(row["lon"]),
-                        "zone": zone, "name": name,
-                        "station": picked, "height": float(row["height"]),
-                    })
+                    enter_spot({**station, "name": name})
                     st.rerun()
     st.stop()
 
 
-# Open on a sport rather than "Any wind", which cannot be rated or compared.
+# Open on a sport rather than "Any wind", which cannot be rated.
 st.session_state.setdefault("activity", "Dinghy")
 activity = st.session_state["activity"]
 spot = st.session_state["spot"]
 LATITUDE, LONGITUDE = spot["lat"], spot["lon"]
-LOCAL_TZ, LOCATION_NAME = spot["zone"], spot["name"]
-# The MeteoSwiss station code, or None for an ERA5 cell.
+LOCAL_TZ, LOCATION_NAME = spot["zone"], spot_title(spot)
+# The station's code, or None for an ERA5 cell.
 STATION = spot.get("station")
-SOURCE_CREDIT = f"MeteoSwiss station {STATION}" if STATION else "ERA5 reanalysis"
-dataset_path = station_dataset(STATION) if STATION else dataset_for(LATITUDE, LONGITUDE)
+SOURCE_CREDIT = source_credit(spot)
+dataset_path = spot_path(spot)
 
 # Navigation: step back one screen without losing the location.
 # One back / forward pair, plus the reset to the very beginning.
@@ -1459,7 +1719,8 @@ current_mode = st.session_state.get("mode")
 # What the map screen remembers about your last pick, cleared on the way back.
 LANDING_PICKS = ("clicked", "preset_applied", "station_pick", "station_find_applied",
                  "station_click_km", "station_clicks_seen")
-nav = st.container(horizontal=True)
+nav = topbar.container(horizontal=True, width="content", vertical_alignment="center",
+                       gap="small", key="nav")
 
 if nav.button(":material/arrow_back: Back", type="secondary"):
     if current_mode is not None:
@@ -1728,68 +1989,20 @@ def lasting_days(flags, length):
     return streak.where(flags, 0).groupby(day).max().ge(length)
 
 
-def flag_hours(frame, first_year, wind, air_min, dates):
-    """The record from `first_year` on, cut to your dates, with each hour
-    flagged twice: is the wind right, and is the air warm enough as well.
-    A window over New Year starts with the first one to open in `first_year`,
-    so none is counted with only its January half."""
-    opened = window_year(frame.index, dates)
-    frame = frame[(opened >= first_year) & in_dates(frame.index, dates)]
-    windy = (frame["speed"] * MS_TO_KNOTS).between(*wind)
-    good = windy if air_min is None else windy & (frame["temp_c"] >= air_min)
-    return frame, windy, good
-
-
-@st.cache_data(show_spinner=False, max_entries=64)
-def condition_odds(path, mtime, zone, first_year, wind, air_min, lasting, hours, dates):
-    """How often the conditions you want turn up on your dates (None for the
-    whole year): by day, month, year and hour. A day counts when your hours
-    on the water hold them for `lasting` hours in a row. `air_min` None
-    leaves the temperature out."""
-    frame, windy, good = flag_hours(load_wind(path, mtime, zone), first_year, wind, air_min, dates)
-    on_water = hour_mask(frame.index, hours)
-
-    days = pd.DataFrame({
-        "good": lasting_days(good[on_water], lasting),
-        "windy": lasting_days(windy[on_water], lasting),
-    })
-    when_on = frame[good & on_water]
-    return {
-        "days": days,
-        "month": days.groupby(days.index.month).mean().reindex(range(1, 13)) * 100,
-        "year": days["good"].groupby(
-            [days.index.year.rename("year"), days.index.month.rename("month")]
-        ).mean() * 100,
-        # Every hour of the day, not only yours, so you can see what you miss.
-        "hour": (
-            good.groupby([frame.index.month, frame.index.hour]).mean()
-            .unstack().reindex(index=range(1, 13), columns=range(24)) * 100
-        ),
-        # The same across all your dates at once.
-        "dates_hour": good.groupby(frame.index.hour).mean().reindex(range(24)) * 100,
-        "best_window": best_window(good.astype(float)),
-        "direction": wind_direction(when_on["u10"], when_on["v10"]).to_numpy(),
-        "knots": (when_on["speed"] * MS_TO_KNOTS).to_numpy(),
-        "on_month": when_on.index.month.to_numpy(),
-    }
+def flag_hours(frame, first_year, wind):
+    """The record from `first_year` on, with each hour flagged when its wind
+    is in your range."""
+    frame = frame[frame.index.year >= first_year]
+    return frame, (frame["speed"] * MS_TO_KNOTS).between(*wind)
 
 
 @st.cache_data(show_spinner=False, max_entries=256)
-def spot_chance(path, mtime, zone, years_back, wind, air_min, lasting, hours, dates):
-    """One spot's share of days with your conditions, over its own last
-    `years_back` years, for ranking spots side by side. None when the air
-    temperature is asked for and the spot has none on record."""
+def good_days(path, mtime, zone, years_back, wind, lasting, hours):
+    """Per local day over a spot's own last `years_back` years: did your
+    hours on the water hold your wind `lasting` hours in a row?"""
     frame = load_wind(path, mtime, zone)
-    if air_min is not None and not ("temp_c" in frame and frame["temp_c"].notna().any()):
-        return None
-    frame, _, good = flag_hours(frame, lookback_start(frame, years_back), wind, air_min, dates)
-    days = lasting_days(good[hour_mask(frame.index, hours)], lasting)
-    if days.empty:
-        return {"pct": 0.0, "years": "no days on record"}
-    return {
-        "pct": float(days.mean() * 100),
-        "years": f"{days.index.min().year}–{days.index.max().year}",
-    }
+    frame, good = flag_hours(frame, lookback_start(frame, years_back), wind)
+    return lasting_days(good[hour_mask(frame.index, hours)], lasting)
 
 
 if "mode" not in st.session_state:
@@ -1797,83 +2010,171 @@ if "mode" not in st.session_state:
 
 
 # --- Start screen ---------------------------------------------------------
+# Your spot beside its map, then the sport, then two ways in, and the
+# screen builds up in that order when you arrive. The cards only say what
+# each view answers, and their drawings show nothing about this spot: the
+# answers wait until you open one.
+
+CHOICES = [
+    ("rating", "One number", "Rate this spot",
+     "One score out of ten for what you sail.", "Rate it"),
+    ("explore", "The whole picture", "Explore this spot",
+     "Windy days month by month, and the wind rose of each month.",
+     "Explore"),
+]
+# Knots across the sport's ruler: enough for the kite's top end.
+GROOVE_SCALE = 40
+
+# The order the screen builds up in. Sent only when you arrive, so a sport
+# change redraws at once. Only these rules animate these elements: one left
+# behind would restart when the sheet goes away.
+START_BUILD_CSS = """
+<style>
+@keyframes drawRule { from { transform: scaleX(0); } to { transform: none; } }
+@media (prefers-reduced-motion: no-preference) {
+    .spot-hero .hero-eyebrow { animation: riseIn .45s ease both; }
+    .spot-hero .accent-rule {
+        transform-origin: left; animation: drawRule .9s cubic-bezier(.65, 0, .35, 1) .25s both;
+    }
+    .spot-hero .stat-strip span { animation: riseIn .4s ease both; }
+    .spot-hero .stat-strip span:nth-child(1) { animation-delay: .5s; }
+    .spot-hero .stat-strip span:nth-child(2) { animation-delay: .57s; }
+    .spot-hero .stat-strip span:nth-child(3) { animation-delay: .64s; }
+    .spot-hero .stat-strip span:nth-child(4) { animation-delay: .71s; }
+    .step-2 { animation: riseIn .45s ease .8s both; }
+    .st-key-activity_pick { animation: riseIn .45s ease .88s both; }
+    .groove { animation: riseIn .45s ease .96s both; }
+    .groove-band { animation-delay: 1.1s; }
+    .groove em { animation-delay: 1.55s; }
+    .step-3 { animation: riseIn .45s ease 1.15s both; }
+    [class*="st-key-choice_"] { animation: riseIn .6s cubic-bezier(.2, .7, .3, 1) both; }
+    .st-key-choice_rating { animation-delay: 1.25s; }
+    .st-key-choice_explore { animation-delay: 1.37s; }
+    /* Then each instrument puts itself together. */
+    .dial i { animation: fadeIn .2s ease both; animation-delay: calc(1.6s + var(--n) * .045s); }
+    .dial-needle, .dial::after, .dial-read { animation: fadeIn .4s ease 2.1s both; }
+    .grid > span { animation: fadeIn .3s ease both; animation-delay: calc(1.7s + var(--c) * .04s); }
+}
+</style>
+"""
+
+
+def dial_face():
+    """Rate: a 0-10 meter whose needle hunts, beside a readout still to come."""
+    ticks = "".join(f'<i style="--n:{n}"></i>' for n in range(11))
+    return (
+        f'<div class="dial">{ticks}<span class="dial-needle"><span></span></span></div>'
+        '<div class="dial-read"><b>?</b><small>out of 10</small></div>'
+    )
+
+
+def grid_face():
+    """Explore: twelve months by six times of day."""
+    return '<div class="grid">' + "".join(
+        f'<span style="--c:{column}">'
+        + "".join(f'<i style="--r:{row}"></i>' for row in range(6))
+        + f"<small>{letter}</small></span>"
+        for column, letter in enumerate("JFMAMJJASOND")
+    ) + "</div>"
+
+
+FACES = {"rating": dial_face, "explore": grid_face}
+
+
+def groove_ruler(low, high, note):
+    """The sport's range of wind, marked on a 0-40 kt ruler."""
+    def at(knots):
+        return f"{knots / GROOVE_SCALE * 100:g}%"
+
+    marks = "".join(
+        f'<span style="left:{at(knots)}">{knots}</span>'
+        for knots in range(0, GROOVE_SCALE + 1, 10)
+    )
+    return (
+        '<div class="groove"><div class="groove-track">'
+        f'<i class="groove-band" style="left:{at(low)};width:{at(high - low)}"></i>'
+        f'<em style="left:{at(low)}">{low}</em><em style="left:{at(high)}">{high} kt</em>'
+        f'</div><div class="groove-scale">{marks}</div>'
+        f'<div class="groove-note">{note}</div></div>'
+    )
+
+
+def step_label(number, text):
+    """A numbered step heading, with the landing's badges."""
+    st.html(f'<div class="step-label step-{number}"><b>{number}</b>{text}</div>')
+
+
+def sport_changed():
+    """A new sport redraws the screen in place, without the build-up."""
+    st.session_state["start_quiet"] = True
+
 
 if st.session_state["mode"] is None:
-    st.html(
-        '<div class="hero">'
-        '<div class="hero-eyebrow">Your spot</div>'
-        f'<div class="hero-title reveal">{reveal(LOCATION_NAME)}</div>'
-        '<hr class="accent-rule">'
-        '<div class="stat-strip">'
-        f"<span><b>{abs(LATITUDE):.2f}°{'N' if LATITUDE >= 0 else 'S'}, "
-        f"{abs(LONGITUDE):.2f}°{'E' if LONGITUDE >= 0 else 'W'}</b></span>"
-        f"<span><b>{data_start.year}–{data_end.year}</b> of hourly readings</span>"
-        f"<span>local time <b>{LOCAL_TZ}</b></span>"
-        + (
-            f"<span>MeteoSwiss station <b>{STATION}</b> · {spot['height']:.0f} m</span>"
-            if STATION else "<span>source <b>ERA5</b></span>"
+    if not st.session_state.pop("start_quiet", False):
+        st.html(START_BUILD_CSS)
+    spot_col, map_col = st.columns([7, 5], gap="large", vertical_alignment="center")
+    with spot_col:
+        st.html(
+            '<div class="hero spot-hero">'
+            '<div class="hero-eyebrow spot-eyebrow"><b>1</b>Your spot</div>'
+            f'<div class="hero-title reveal">{reveal(html.escape(LOCATION_NAME))}</div>'
+            '<hr class="accent-rule">'
+            '<div class="stat-strip">'
+            f"<span><b>{abs(LATITUDE):.2f}°{'N' if LATITUDE >= 0 else 'S'}, "
+            f"{abs(LONGITUDE):.2f}°{'E' if LONGITUDE >= 0 else 'W'}</b></span>"
+            f"<span><b>{data_start.year}–{data_end.year}</b> hourly</span>"
+            f"<span>local time <b>{LOCAL_TZ}</b></span>"
+            + (
+                f"<span>{STATION_NAMES[spot['source']]} <b>{STATION}</b> · "
+                f"{spot['height']:.0f} m</span>"
+                if STATION else "<span>source <b>ERA5</b></span>"
+            )
+            + "</div></div>"
         )
-        + "</div></div>"
-    )
-    locator_map(LATITUDE, LONGITUDE, key="start_map", height=300, cell=not STATION)
+        step_label(2, "What are you sailing?")
+        st.session_state["activity"] = pick(
+            st.segmented_control(
+                "What are you sailing?", list(ACTIVITIES),
+                default=st.session_state["activity"],
+                format_func=lambda name: f"{ACTIVITIES[name]['icon']} {name}",
+                key="activity_pick", label_visibility="collapsed",
+                on_change=sport_changed,
+            ),
+            st.session_state["activity"],
+        )
+        chosen = st.session_state["activity"]
+        groove_low, groove_high = ACTIVITIES[chosen]["groove"]
+        if can_score(chosen):
+            note = (
+                f"Scoring and the speed bands use {groove_low}–{groove_high} kt as the "
+                "range worth going out in."
+            )
+        else:
+            note = (
+                f"{chosen} counts every day from {groove_low} to {groove_high} kt, so "
+                "it is for exploring only. Pick a sport to rate the spot."
+            )
+        st.html(groove_ruler(groove_low, groove_high, note))
+    with map_col:
+        locator_map(LATITUDE, LONGITUDE, key="start_map", height=340, cell=not STATION)
 
-    st.write("")
-    st.session_state["activity"] = pick(
-        st.segmented_control(
-            "Step 2 · What are you sailing?", list(ACTIVITIES),
-            default=st.session_state["activity"],
-            format_func=lambda name: f"{ACTIVITIES[name]['icon']} {name}",
-            key="activity_pick",
-        ),
-        st.session_state["activity"],
-    )
-    chosen = st.session_state["activity"]
-    groove_low, groove_high = ACTIVITIES[chosen]["groove"]
-    if can_score(chosen):
-        st.caption(
-            f"Scoring and the speed bands use {groove_low}–{groove_high} kt as the "
-            "range worth going out in."
+    step_label(3, "What do you want to know?")
+    for column, (target, kicker, title, blurb, action) in zip(
+        st.columns(2, gap="medium"), CHOICES
+    ):
+        locked = target == "rating" and not can_score(chosen)
+        lock_note = (
+            '<div class="choice-lock">Pick a sport above to rate the spot.</div>'
+            if locked else ""
         )
-    else:
-        st.caption(
-            f"{chosen} counts every day from {groove_low} to {groove_high} kt, so "
-            "it is for exploring only. Pick a sport to rate or compare spots."
-        )
-
-    st.write("")
-    st.markdown("###### Step 3 · What do you want to see?")
-    cards = [
-        (
-            ":material/insights: Explore this spot",
-            "Your chances of the wind and warmth you want, all year or on your "
-            "dates, and how your other spots compare.",
-            "Start exploring",
-            "explore",
-        ),
-        (
-            ":material/star: Rate this spot",
-            "One score out of ten for what you sail: days in the groove, "
-            "season length and steadiness.",
-            "Rate the location",
-            "rating",
-        ),
-        (
-            ":material/compare_arrows: Compare two spots",
-            "Put this spot against another you have downloaded: scores, months "
-            "and wind direction.",
-            "Compare locations",
-            "compare",
-        ),
-    ]
-    # Fixed height keeps all three cards identical; the stretch spacer pins
-    # each button to the bottom however many lines the blurb wraps to.
-    for column, (heading, blurb, action, target) in zip(st.columns(3), cards):
-        with column.container(border=True, height=230):
-            st.markdown(f"#### {heading}")
-            st.write(blurb)
-            st.space("stretch")
-            locked = target != "explore" and not can_score(chosen)
-            if st.button(action, width="stretch", type="secondary", disabled=locked):
+        with column.container(border=True, key=f"choice_{target}"):
+            st.html(
+                f'<div class="choice-face" aria-hidden="true">{FACES[target]()}</div>'
+                f'<div class="choice-text"><div class="choice-kicker">{kicker}</div>'
+                f'<div class="choice-title">{title}</div>'
+                f'<div class="choice-blurb">{blurb}</div>{lock_note}</div>'
+            )
+            if st.button(action, key=f"pick_{target}", width="stretch", disabled=locked):
                 st.session_state["mode"] = target
                 st.session_state.pop("last_mode", None)
                 st.session_state["rating_fresh"] = target == "rating"
@@ -1882,230 +2183,238 @@ if st.session_state["mode"] is None:
 
 
 # --- Settings ------------------------------------------------------------
-# Below the start screen on purpose: the sidebar only appears once you are
-# inside a view, and then it carries everything that changes what you see,
-# in the order you would decide it: what you sail, what you want, when.
-# Shared by every view, so the rating cannot quietly score different hours
-# than the ones you picked. sticky() keeps a choice while another view hides
-# its widget.
+# Inside a view the sidebar carries everything it counts, what you sail
+# first. Explore and the rating share it, so the two cannot quietly count
+# different hours.
 
-EXPLORING = st.session_state["mode"] == "explore"
-HAS_TEMP = "temp_c" in df.columns and bool(df["temp_c"].notna().any())
 
-st.sidebar.header("Settings")
-if EXPLORING:
-    st.sidebar.subheader("Your conditions")
-
-activity = st.sidebar.selectbox(
-    "What you sail", list(ACTIVITIES),
-    index=list(ACTIVITIES).index(st.session_state["activity"]),
-    key="activity_side",
-)
-st.session_state["activity"] = activity
-groove_low, groove_high = ACTIVITIES[activity]["groove"]
-
-if EXPLORING:
-    # One range per sport, so switching sport brings back its own wind.
-    wind_low, wind_high = st.sidebar.slider(
-        "Wind", 0, WIND_TOP, format="%d kn",
-        key=sticky(f"wind_{activity}", ACTIVITIES[activity]["groove"]),
+def settings(mode):
+    """The sidebar inside a view: what you sail, then everything else the
+    view counts. Returns what you sail."""
+    side = st.sidebar
+    side.header("Settings")
+    activity = side.selectbox(
+        "What you sail", list(ACTIVITIES),
+        index=list(ACTIVITIES).index(st.session_state["activity"]), key="activity_side",
     )
-    air_pick = st.sidebar.select_slider(
-        "Air at least", ["Any", *range(10, 36)],
-        format_func=lambda value: "any" if value == "Any" else f"{value} °C",
-        key=sticky("air_min", "Any"), disabled=not HAS_TEMP,
+    st.session_state["activity"] = activity
+    groove = ACTIVITIES[activity]["groove"]
+    if mode == "rating":
+        side.caption(f"Sailable wind {groove[0]}–{groove[1]} kt")
+    else:
+        remembered(side.slider, "Wind", 0, WIND_TOP, format="%d kn",
+                   key=f"wind_{activity}", default=groove)
+    hours = remembered(side.slider, "On the water", 0, 23, format="%d:00",
+                       key="hours", default=DEFAULT_HOURS)
+    side.caption("Every hour of the day" if hours == (0, 23)
+                 else f"{hours[0]:02d}:00–{hours[1]:02d}:59 local time")
+    if mode == "rating":
+        return activity
+    remembered(side.segmented_control, "In a row", [1, 2, 3], format_func=lambda h: f"{h} h",
+               required=True, key="lasting", default=DEFAULT_LASTING, start="default")
+    remembered(side.segmented_control, "Years", list(LOOKBACK), required=True,
+               key="years", default=DEFAULT_YEARS, start="default")
+    return activity
+
+
+# --- Explore: the spot at a glance -----------------------------------------
+# What the wind does here all year on one screen: four figures, the windy
+# days month by month, and the wind rose of the month you click beside the
+# map, with your settings in the sidebar.
+
+POINT_WORDS = {"N": "north", "E": "east", "S": "south", "W": "west"}
+
+# The styles of explore's overview, sent with it.
+ANSWER_CSS = """
+<style>
+.legend { display: flex; flex-wrap: wrap; gap: .4rem 1.2rem; margin-top: 1rem; font-size: .8rem; color: #8b98a5; }
+.legend span::before {
+    content: ""; display: inline-block; width: .6rem; height: .6rem; margin-right: .45rem;
+    border-radius: 50%; background: var(--c);
+}
+
+</style>
+"""
+
+
+def compass_words(point):
+    """ENE as said aloud: east-northeast."""
+    words = [POINT_WORDS[letter] for letter in point]
+    return f"{words[0]}-{''.join(words[1:])}" if len(words) == 3 else "".join(words)
+
+
+def water_hours(hours):
+    start, end = hours
+    return [(start + step) % 24 for step in range((end - start) % 24 + 1)]
+
+
+def best_hours(pct, hours, length=3):
+    """The `length` hours in a row on the water that most often have it."""
+    span = water_hours(hours)
+    length = min(length, len(span))
+    runs = [span[i:i + length] for i in range(len(span) - length + 1)]
+    return max(runs, key=lambda run: pct.reindex(run).fillna(0).mean())
+
+
+MONTHS = [calendar.month_abbr[month] for month in range(1, 13)]
+
+
+def section(title, note):
+    """A heading for one part of the overview, with a quiet note beside it."""
+    st.html(f'<div class="section-label">{title}<small>{note}</small></div>')
+
+
+def band_legend(ladder):
+    """The speed bands in the colours the rose gives them."""
+    return '<div class="legend">' + "".join(
+        f'<span style="--c:{colour}">over {threshold} kt</span>'
+        for threshold, colour in zip(ladder, THRESHOLD_COLORS)
+    ) + "</div>"
+
+
+def over_bands(knots, groups, ladder):
+    """Per group, the share of `knots` above each speed of the ladder, in %."""
+    return pd.DataFrame({
+        threshold: (knots > threshold).groupby(groups).mean() * 100 for threshold in ladder
+    })
+
+
+def month_chart(share):
+    """Each month as nested bars, one per speed band and the lightest
+    longest, drawn first. A click on a month picks it for the wind rose."""
+    pick = alt.selection_point(name="month", fields=["month"], on="click")
+    y = alt.Y("name:N", sort=MONTHS, title=None,
+              axis=alt.Axis(ticks=False, domain=False, labelPadding=8, labelFontSize=12))
+    x = alt.X("pct:Q", scale=alt.Scale(domain=[0, 100]), title="% of days",
+              axis=alt.Axis(values=[0, 25, 50, 75, 100], ticks=False, domain=False, grid=False))
+    months = pd.DataFrame({"month": range(1, 13), "name": MONTHS})
+    layers = [
+        alt.Chart(months.assign(pct=share[threshold].reindex(range(1, 13)).fillna(0).to_numpy()))
+        .mark_bar(height=20, cornerRadiusEnd=3, color=colour)
+        .encode(y=y, x=x, opacity=alt.condition(pick, alt.value(1.0), alt.value(0.25)))
+        for threshold, colour in zip(share.columns, THRESHOLD_COLORS)
+    ]
+    # An invisible bar across each row on top, so a month is easy to hit
+    # even where its own bars stop short. It carries the month's numbers.
+    bands = {f"over {threshold} kt": share[threshold].reindex(range(1, 13)).fillna(0).to_numpy()
+             for threshold in share.columns}
+    layers.append(
+        alt.Chart(months.assign(**bands)).mark_bar(height=20, opacity=0)
+        .encode(y=y, x=alt.value(0), x2=alt.value(alt.expr("width")), tooltip=[
+            alt.Tooltip("name:N", title="month"),
+            *[alt.Tooltip(f"{band}:Q", title=f"% of days {band}", format=".0f") for band in bands],
+        ])
+        .add_params(pick)
     )
-    if not HAS_TEMP:
-        st.sidebar.caption(
-            "This station does not record air temperature." if STATION else
-            "No temperature in this download; refetch the spot to include it."
-        )
-    air_min = air_pick if HAS_TEMP and air_pick != "Any" else None
-    lasting = st.sidebar.segmented_control(
-        "Lasting at least", [1, 2, 3], format_func=lambda h: f"{h} h",
-        required=True, key=sticky("lasting", 2),
-    )
-else:
-    st.sidebar.caption(f"Sailable wind {groove_low}–{groove_high} kt")
-
-if EXPLORING:
-    st.sidebar.subheader("When")
-hours = st.sidebar.slider(
-    "On the water", 0, 23, format="%d:00", key=sticky("hours", (10, 17)),
-)
-SESSION_WINDOWS = (hours,)
-SESSION_TEXT = "all day" if hours == (0, 23) else f"{hours[0]:02d}:00–{hours[1]:02d}:59"
-st.sidebar.caption("Every hour of the day" if hours == (0, 23) else f"{SESSION_TEXT} local time")
-
-DATES = None
-if EXPLORING:
-    season = pick(
-        st.sidebar.segmented_control(
-            "Dates", ["All year", "Pick dates"], required=True,
-            key=sticky("season", "All year"),
-        ),
-        "All year",
-    )
-    if season == "Pick dates":
-        today = date.today()
-        coming = date(today.year + (today.month == 12), today.month % 12 + 1, 1)
-        # Not sticky(): a range picker only knows it is a range from the value
-        # it is given, and Streamlit objects to a value given alongside one set
-        # through session state. So the kept range goes in as that value.
-        picked = st.sidebar.date_input(
-            "From – to", value=st.session_state.get("kept_dates", (coming, coming.replace(day=15))),
-            min_value=date(today.year, 1, 1), max_value=date(today.year + 1, 12, 31),
-            format="DD.MM.YYYY", key="dates",
-            help="Only the day and month count: every year in the record is "
-            "checked on these dates. To span New Year, end in the next year.",
-        )
-        st.session_state["kept_dates"] = picked
-        DATES = as_dates(picked)
-        if DATES:
-            st.sidebar.caption(f"{dates_label(DATES)}, in every year")
-    # segmented_control can still come back empty; keep the default then.
-    span = pick(
-        st.sidebar.segmented_control(
-            "Years", list(LOOKBACK), required=True, key=sticky("years", "20 years"),
-        ),
-        "20 years",
-    )
-
-# Forward, or switching sport in the sidebar, can land here with a range
-# that has nothing to score.
-if st.session_state["mode"] in ("rating", "compare") and not can_score(activity):
-    st.info(
-        f"**{activity}** counts every day as sailable, so there is nothing to "
-        "score. Pick what you sail in the sidebar."
-    )
-    st.stop()
+    return alt.layer(*layers).properties(height=470)
 
 
-# --- Compare two locations ------------------------------------------------
+if st.session_state["mode"] == "explore":
+    st.html(ANSWER_CSS)
+    activity = settings("explore")
+    ladder = ACTIVITIES[activity]["ladder"]
+    wind = tuple(kept(f"wind_{activity}", ACTIVITIES[activity]["groove"]))
+    hours = tuple(kept("hours", DEFAULT_HOURS))
+    lasting = kept("lasting", DEFAULT_LASTING)
+    years_back = LOOKBACK[kept("years", DEFAULT_YEARS)]
 
-if st.session_state["mode"] == "compare":
-    activity = st.session_state["activity"]
-    others = {
-        key: entry for key, entry in downloaded_locations().items()
-        if entry["path"] != dataset_path
-    }
+    recent = df[df.index.year >= lookback_start(df, years_back)]
+    knots = recent["speed"] * MS_TO_KNOTS
+    direction = wind_direction(recent["u10"], recent["v10"])
+    water = hour_mask(recent.index, hours)
+    with st.spinner("Counting your days..."):
+        days = good_days(dataset_path, dataset_path.stat().st_mtime, LOCAL_TZ,
+                         years_back, wind, lasting, hours)
+    years_text = f"{recent.index.min().year}–{recent.index.max().year}"
+    hours_text = "all day" if hours == (0, 23) else f"{hours[0]:02d}:00–{hours[1]:02d}:59"
 
     st.html(
-        '<div class="reveal" style="font-size:1.5rem;font-weight:650">'
-        + reveal("Head to head")
-        + '</div><hr class="accent-rule">'
+        f'<div class="hero"><div class="hero-eyebrow">Explore · {activity}</div>'
+        f'<div class="hero-title reveal">{reveal(html.escape(LOCATION_NAME))}</div>'
+        '<hr class="accent-rule"></div>'
     )
-    if not others:
-        st.info(
-            "Only one location is downloaded so far. Press **Start over**, pick a "
-            "second spot on the map and fetch it, then come back here."
-        )
-        st.stop()
-
-    choice = st.sidebar.selectbox(
-        "Compare against", list(others),
-        format_func=lambda key: others[key]["name"],
-    )
-    rival = others[choice]
-
-    first_year = max(data_start.year, data_end.year - RATING_YEARS + 1)
-    with st.spinner("Scoring both spots..."):
-        here = rate_location(
-            dataset_path, dataset_path.stat().st_mtime, LOCAL_TZ, first_year,
-            activity, SESSION_WINDOWS,
-        )
-        there = rate_location(
-            rival["path"], rival["path"].stat().st_mtime, rival["zone"],
-            first_year, activity, SESSION_WINDOWS,
-        )
-
-    contenders = [(LOCATION_NAME, here), (rival["name"], there)]
-    winner = max(contenders, key=lambda pair: pair[1]["overall"])[0]
-    margin = abs(here["overall"] - there["overall"])
-
     st.caption(
-        f"Judged for **{activity.lower()}** over {here['years']}, "
-        f"counting {SESSION_TEXT} local at each spot."
+        f"{years_text} · your hours on the water {hours_text}, local time · "
+        f"data: {SOURCE_CREDIT}"
     )
-    if bool(STATION) != bool(rival.get("station")):
-        st.caption(
-            ":material/info: One of these is a MeteoSwiss station and the other an "
-            "ERA5 cell. A station measures the wind where it stands; ERA5 averages "
-            "a 25 km cell, which smooths out local effects. Read the gap with that "
-            "in mind."
-        )
 
-    # Scores side by side, the stronger one called out.
-    for column, (name, verdict) in zip(st.columns(2), contenders):
-        with column.container(border=True):
-            st.markdown(f"**{name}**")
-            st.metric(
-                "Score", f"{verdict['overall']:.1f} / 10",
-                delta="ahead" if name == winner and margin > 0.05 else None,
-                delta_arrow="off",
-                chart_data=verdict["month_curve"], chart_type="area",
-                help="Share of days in the groove, month by month",
-            )
+    # Four figures: how often, when in the year, when in the day, from where.
+    per_month = days.groupby(days.index.month).mean()
+    in_range = knots.between(*wind)
+    best = int(per_month.idxmax()) if days.any() else None
+    stretch = best_hours(in_range.groupby(recent.index.hour).mean(), hours)
+    figures = st.columns(4)
+    figures[0].metric(
+        "Days with your wind", f"{days.mean() * 365:.0f} a year" if len(days) else "–",
+        border=True, icon=":material/event_available:",
+        help=f"Days when {wind_words(wind)} holds {lasting} h in a row, {hours_text}, "
+        f"in {years_text}",
+    )
+    figures[1].metric(
+        "Best month", calendar.month_name[best] if best else "–", border=True,
+        icon=":material/trending_up:", delta_arrow="off", delta_color="off",
+        delta=f"about {per_month[best] * calendar.monthrange(2001, best)[1]:.0f} days with it"
+        if best else None,
+    )
+    figures[2].metric(
+        "Best time of day",
+        f"{stretch[0]:02d}:00–{stretch[-1]:02d}:59" if in_range[water].any() else "–",
+        border=True, icon=":material/schedule:",
+        help="The three hours in a row, of your hours on the water, that most often have your wind",
+    )
+    figures[3].metric(
+        "Wind comes from", prevailing_direction(direction[water]), border=True,
+        icon=":material/explore:", help=f"In your hours, typically a {beaufort(knots[water].mean())}",
+    )
+
+    # The month by month bands beside the rose of the month you click.
+    daily = knots[water].resample("1D").mean().dropna()
+    month_share = over_bands(daily, daily.index.month, ladder)
+    chart_col, rose_col = st.columns([3, 2], gap="large")
+    with chart_col:
+        section("Windy days, month by month", "days whose wind over your hours tops each speed")
+        st.html(band_legend(ladder))
+        event = st.altair_chart(month_chart(month_share), on_select="rerun", key="month_pick",
+                                width="stretch")
+        picked = (event.selection or {}).get("month") or []
+        month = picked[0]["month"] if picked else None
+        st.caption("Click a month for its wind rose, double-click for the whole year.")
+    when = "All year" if month is None else calendar.month_name[month]
+    here = water & (recent.index.month == month) if month else water
+    with rose_col:
+        section(when, "where the wind comes from in your hours")
+        if here.any():
+            rose = draw_rose(direction[here], knots[here], ladder, "knots")
+            st.pyplot(rose, width="stretch")
+            plt.close(rose)
             st.caption(
-                f"{verdict['groove_pct']:.0f}% of days in the groove · "
-                f"best in {calendar.month_name[verdict['best_month']]} · "
-                f"wind from {verdict['prevailing']}"
+                f"Mostly from the {compass_words(prevailing_direction(direction[here]))}, "
+                f"{knots[here].mean():.0f} kt on average. Check the map: is that way open water?"
             )
+        else:
+            st.info("No readings in your hours.")
+        locator_map(LATITUDE, LONGITUDE, key="explore_map", height=220, cell=not STATION)
 
-    if margin < 0.05:
-        st.info("Too close to call — these two score the same.")
-    else:
-        st.html(
-            '<div class="reveal" style="font-size:1.3rem;font-weight:650;color:#7bd88f">'
-            + reveal(f"{winner} comes out ahead by {margin:.1f} points")
-            + "</div>"
-        )
-
-    # Month by month, which spot puts you on the water more often.
-    months = [calendar.month_abbr[m] for m in range(1, 13)]
-    monthly = pd.DataFrame(
-        [
-            {"month": months[m], "order": m, "spot": name, "pct": verdict["month_curve"][m]}
-            for name, verdict in contenders
-            for m in range(12)
-        ]
-    )
-    st.altair_chart(
-        alt.Chart(monthly)
-        .mark_line(point=True, strokeWidth=2)
-        .encode(
-            x=alt.X("month:N", sort=months, title=None),
-            y=alt.Y("pct:Q", title="% of days in the groove"),
-            color=alt.Color("spot:N", title=None,
-                            scale=alt.Scale(range=["#fb8500", "#8ecae6"])),
-            tooltip=["spot:N", "month:N", alt.Tooltip("pct:Q", format=".0f")],
-        )
-        .properties(height=260),
-        width="stretch",
-    )
-
-    # Where the wind comes from at each.
-    for column, (name, verdict) in zip(st.columns(2), contenders):
-        with column:
-            st.caption(f"**{name}** — wind direction")
-            st.pyplot(
-                draw_rose(verdict["direction"], verdict["knots"],
-                          ACTIVITIES[activity]["ladder"], "knots"),
-                width="stretch",
-            )
-
-    with st.expander("Score breakdown"):
-        breakdown = pd.DataFrame(
-            {name: {part: round(score, 1) for part, (score, _) in verdict["parts"].items()}
-             for name, verdict in contenders}
-        )
-        st.dataframe(breakdown, width="stretch")
     st.stop()
 
 
 # --- Rating ---------------------------------------------------------------
 
 if st.session_state["mode"] == "rating":
+    activity = settings("rating")
+    # Forward, or switching sport in the sidebar, can land here with a range
+    # that has nothing to score.
+    if not can_score(activity):
+        st.info(
+            f"**{activity}** counts every day as sailable, so there is nothing to "
+            "score. Pick what you sail in the sidebar."
+        )
+        st.stop()
+    groove_low, groove_high = ACTIVITIES[activity]["groove"]
+    hours = tuple(kept("hours", DEFAULT_HOURS))
+    SESSION_WINDOWS = (hours,)
+    SESSION_TEXT = "all day" if hours == (0, 23) else f"{hours[0]:02d}:00–{hours[1]:02d}:59"
+
     first_year = max(data_start.year, data_end.year - RATING_YEARS + 1)
     with st.spinner("Reading the last 20 years..."):
         rating = rate_location(
@@ -2113,7 +2422,6 @@ if st.session_state["mode"] == "rating":
             activity, SESSION_WINDOWS,
         )
 
-    activity = st.session_state["activity"]
     fresh = st.session_state.pop("rating_fresh", False)
     stars = round(rating["overall"] / 2)
     hero = st.empty()
@@ -2207,10 +2515,9 @@ if st.session_state["mode"] == "rating":
     with map_col:
         locator_map(LATITUDE, LONGITUDE, key="rating_map", height=340, cell=not STATION)
     with rose_col:
-        st.pyplot(
-            draw_rose(rating["direction"], rating["knots"], ACTIVITIES[activity]["ladder"], "knots"),
-            width="stretch",
-        )
+        rose = draw_rose(rating["direction"], rating["knots"], ACTIVITIES[activity]["ladder"], "knots")
+        st.pyplot(rose, width="stretch")
+        plt.close(rose)
     with note_col:
         st.markdown("**How this is scored**")
         st.caption(
@@ -2223,522 +2530,3 @@ if st.session_state["mode"] == "rating":
             "parts are shown above so you can weigh them yourself."
         )
     st.stop()
-
-
-# --- Explore: your chances of the conditions you want ---------------------
-
-years_back = LOOKBACK[span]
-first_year = lookback_start(df, years_back)
-with st.spinner("Counting your days..."):
-    odds = condition_odds(
-        dataset_path, dataset_path.stat().st_mtime, LOCAL_TZ, first_year,
-        (wind_low, wind_high), air_min, lasting, hours, DATES,
-    )
-by_month, days = odds["month"], odds["days"]
-# How many days the window holds in an ordinary year.
-window_length = 365 if DATES is None else len(window_days(DATES))
-# The years your dates actually turn up in, which a window still to come
-# this year stops short of.
-years_text = (
-    f"{days.index.min().year}–{days.index.max().year}" if len(days)
-    else f"{first_year}–{data_end.year}"
-)
-
-wind_text = (
-    f"{wind_low}+ kn" if wind_high >= WIND_TOP else
-    f"up to {wind_high} kn" if wind_low == 0 else
-    f"{wind_low}–{wind_high} kn"
-)
-wanted = wind_text + ("" if air_min is None else f" and {air_min} °C+")
-within = (
-    "at any hour" if hours == (0, 23)
-    else f"between {hours[0]:02d}:00 and {hours[1]:02d}:59"
-)
-
-st.html(
-    '<div class="reveal" style="font-size:1.5rem;font-weight:650">'
-    + reveal(f"How often you get {wanted}" + ("" if DATES is None else f", {dates_label(DATES)}"))
-    + '</div><hr class="accent-rule">'
-)
-st.caption(
-    f"A day counts when that lasts {lasting} h in a row {within} local time · "
-    f"{years_text} · data: {SOURCE_CREDIT}"
-)
-
-
-def expect_text(pct):
-    """A chance put as days: out of your dates, or out of a year."""
-    count = round(pct / 100 * window_length)
-    return f"{count} of {window_length} days" if DATES else f"{count} days a year"
-
-
-def day_axis(**options):
-    """A time axis read in days, '1 Jun'. On a short window, a tick every day
-    or few counted from its first day: left to itself the axis ticks every
-    few hours, or restarts its count at the 1st and crowds the month's end."""
-    if window_length <= 40:
-        order = window_days(DATES)
-        ticks = axis_dates([m for m, _ in order], [d for _, d in order], DATES)
-        options["values"] = [
-            alt.DateTime(year=int(tick.year), month=int(tick.month), date=int(tick.day))
-            for tick in ticks.iloc[::max(1, -(-window_length // 12))]
-        ]
-    return alt.Axis(format="%-d %b", labelAngle=0, labelOverlap="greedy", grid=False, **options)
-
-
-def spot_ranking():
-    """The same conditions, hours and dates at every spot you have downloaded,
-    best first: where to go for a training camp or a regatta."""
-    st.markdown("**Against your other spots**")
-    spots = downloaded_locations()
-    names = [entry["name"] for entry in spots.values()]
-    rows, no_air = [], []
-    with st.spinner("Counting days at your other spots..."):
-        for key, entry in spots.items():
-            path = entry["path"]
-            result = spot_chance(
-                path, path.stat().st_mtime, entry["zone"], years_back,
-                (wind_low, wind_high), air_min, lasting, hours, DATES,
-            )
-            if result is None:
-                no_air.append(entry["name"])
-                continue
-            here = path == dataset_path
-            # Two spots can share a name; the key tells them apart.
-            name = entry["name"] if names.count(entry["name"]) == 1 else f"{entry['name']} · {key}"
-            rows.append({
-                "spot": f"{name} (this spot)" if here else name,
-                "here": here,
-                "pct": result["pct"],
-                "note": f"{percent(result['pct'])} · {expect_text(result['pct'])}",
-                "years": result["years"],
-                "source": f"MeteoSwiss {entry['station']}" if entry.get("station") else "ERA5",
-            })
-    left_out = (
-        f"Left out, no air temperature on record: {', '.join(no_air)}." if no_air else ""
-    )
-    if len(rows) < 2:
-        st.caption(
-            "Download another spot from the map to see how it compares. " + left_out
-        )
-        return
-
-    ranking = pd.DataFrame(rows).sort_values("pct", ascending=False)
-    base = alt.Chart(ranking).encode(
-        # No axis: each bar carries its number. The domain runs past 100 to
-        # leave the longest bar room for its label.
-        x=alt.X("pct:Q", axis=None, scale=alt.Scale(domain=[0, 145])),
-        y=alt.Y("spot:N", sort=ranking["spot"].tolist(), title=None,
-                axis=alt.Axis(labelLimit=260, labelFontSize=12)),
-        tooltip=[
-            alt.Tooltip("spot:N"),
-            alt.Tooltip("pct:Q", title="% of days with it", format=".0f"),
-            alt.Tooltip("years:N", title="years counted"),
-            alt.Tooltip("source:N"),
-        ],
-    )
-    st.altair_chart(
-        alt.layer(
-            base.mark_bar(size=18, cornerRadiusTopRight=4, cornerRadiusBottomRight=4)
-            .encode(color=alt.condition(alt.datum.here, alt.value(GOOD_COLOR),
-                                        alt.value(WATER_SHADE))),
-            base.mark_text(align="left", dx=6, fontSize=12, color=theme_colors()["fg"])
-            .encode(text="note:N"),
-        ).properties(height=34 * len(ranking)),
-        width="stretch",
-    )
-    record = "whole record" if years_back is None else f"last {years_back} years"
-    st.caption(
-        f"The same conditions{', dates' if DATES else ''} and hours ({within}, local "
-        f"time at each spot), over each spot's {record}. {left_out}"
-    )
-    if ranking["source"].str.startswith("MeteoSwiss").nunique() > 1:
-        st.caption(
-            ":material/info: A MeteoSwiss station measures the wind where it stands; "
-            "ERA5 averages a 25 km cell, which smooths out local effects. Read the "
-            "gaps between the two kinds with that in mind."
-        )
-
-
-def draw_hours(pct):
-    """Share of each hour that has it, with your hours on the water shaded."""
-    hour_data = pd.DataFrame({
-        "mid": np.arange(24) + 0.5,
-        "label": [f"{h:02d}:00–{h:02d}:59" for h in range(24)],
-        "pct": pct.fillna(0).to_numpy(),
-    })
-    x_hour = alt.X(
-        "mid:Q", scale=alt.Scale(domain=[0, 24]), title=None,
-        axis=alt.Axis(values=list(range(0, 25, 3)), labelExpr="datum.value + 'h'"),
-    )
-    hover = alt.selection_point(
-        on="pointerover", nearest=True, fields=["mid"], empty=False, clear="pointerout",
-    )
-    line = alt.Chart(hour_data).encode(x=x_hour, y=alt.Y("pct:Q", title="% of hours"))
-    st.altair_chart(
-        alt.layer(
-            alt.Chart(pd.DataFrame({"start": [hours[0]], "end": [hours[1] + 1]}))
-            .mark_rect(color=WATER_SHADE, opacity=0.14)
-            .encode(x="start:Q", x2="end:Q"),
-            line.mark_area(color=GOOD_COLOR, opacity=0.1, interpolate="monotone"),
-            line.mark_line(color=GOOD_COLOR, strokeWidth=2, interpolate="monotone"),
-            alt.Chart(hour_data).mark_rule(color=WATER_SHADE).encode(x=x_hour)
-            .transform_filter(hover),
-            line.mark_point(filled=True, size=80, color=GOOD_COLOR,
-                            stroke=SURFACE, strokeWidth=2)
-            .encode(
-                opacity=alt.condition(hover, alt.value(1.0), alt.value(0.0)),
-                tooltip=[alt.Tooltip("label:N", title="hour"),
-                         alt.Tooltip("pct:Q", title="% of hours with it", format=".0f")],
-            )
-            .add_params(hover),
-        ).properties(height=300),
-        width="stretch",
-    )
-    st.caption("Share of each hour that has it. Shaded: your hours on the water.")
-
-
-overall = float(days["good"].mean() * 100) if len(days) else 0.0
-if overall == 0:
-    st.info(
-        "Not a single day like that "
-        + ("" if DATES is None else f"on {dates_label(DATES)} ")
-        + f"in {years_text}. Try less wind, cooler air, a shorter stretch, more "
-        "hours on the water" + (" or other dates." if DATES else ".")
-    )
-    spot_ranking()
-    st.stop()
-
-month_names = [calendar.month_abbr[m] for m in range(1, 13)]
-month_days = [calendar.monthrange(2001, m)[1] for m in range(1, 13)]
-GOOD_LABEL, COLD_LABEL = "Wind and warm air", "Wind, but colder"
-start_hour, end_hour, _ = odds["best_window"]
-
-kpis = st.columns(4)
-if DATES is None:
-    best_month = int(by_month["good"].idxmax())
-    best_pct = float(by_month.loc[best_month, "good"])
-    best_days = round(best_pct / 100 * month_days[best_month - 1])
-    best_days_text = (
-        "under a day" if best_days < 1 else f"about {best_days} day{'s' if best_days > 1 else ''}"
-    )
-    kpis[0].metric(
-        "Any day of the year", percent(overall), border=True,
-        icon=":material/event_available:",
-        help=f"Share of all days {years_text} that give you this",
-    )
-    kpis[1].metric(
-        "Best month", calendar.month_name[best_month], border=True,
-        icon=":material/trending_up:", delta_arrow="off", delta_color="off",
-        delta=f"{percent(best_pct)} · {best_days_text}",
-    )
-else:
-    # Only years whose whole window is on record, so a gap in the readings
-    # does not pass for a lean year.
-    per_year = days["good"].groupby(window_year(days.index, DATES)).agg(["sum", "size"])
-    full = per_year.loc[per_year["size"] >= window_length, "sum"]
-    expected = overall / 100 * window_length
-    kpis[0].metric(
-        "Chance on a given day", percent(overall), border=True,
-        icon=":material/event_available:",
-        help=f"Share of all days {dates_label(DATES)} in {years_text} that gave you this",
-    )
-    if window_length == 1:
-        # A single day, a race day: count the years rather than the days.
-        kpis[1].metric(
-            "Years that had it", f"{full.sum():.0f} of {len(full)}", border=True,
-            icon=":material/date_range:",
-        )
-    else:
-        kpis[1].metric(
-            "Days you can expect",
-            f"{expected:.0f} of {window_length}" if window_length >= 5
-            else f"{expected:.1f} of {window_length}",
-            border=True, icon=":material/date_range:",
-            delta=(
-                f"{full.min():.0f} every year" if len(full) > 1 and full.min() == full.max()
-                else f"{full.min():.0f}–{full.max():.0f}, leanest to best year"
-                if len(full) > 1 else None
-            ),
-            delta_arrow="off", delta_color="off",
-            help="In a typical year: the chance on a given day times the days in your window",
-        )
-kpis[2].metric(
-    "Best time of day", f"{start_hour:02d}:00–{end_hour:02d}:59", border=True,
-    icon=":material/schedule:",
-    help="The three hours that most often have it, "
-    + ("all year" if DATES is None else "on your dates"),
-)
-kpis[3].metric(
-    "Wind comes from", prevailing_direction(odds["direction"]), border=True,
-    icon=":material/explore:", help="When it is on, during your hours",
-)
-
-bar_style = dict(cornerRadiusTopLeft=4, cornerRadiusTopRight=4)
-if air_min is not None:
-    series = alt.Scale(domain=[GOOD_LABEL, COLD_LABEL], range=[GOOD_COLOR, COLD_COLOR])
-    good_color = alt.Color("series:N", scale=series, title=None)
-else:
-    good_color = alt.value(GOOD_COLOR)
-
-chart_col, hour_col = st.columns([3, 2], gap="medium")
-if DATES is None:
-    # Month by month. With a temperature set, the blue cap shows the days
-    # that bring the wind but not the warmth.
-    month_data = pd.DataFrame({
-        "month": range(1, 13),
-        "name": month_names,
-        "good": by_month["good"].fillna(0).to_numpy(),
-        "windy": by_month["windy"].fillna(0).to_numpy(),
-    })
-    month_data["days"] = month_data["good"] / 100 * month_days
-    month_tooltip = [
-        alt.Tooltip("name:N", title="month"),
-        alt.Tooltip("good:Q", title="% of days with it", format=".0f"),
-        alt.Tooltip("days:Q", title="days in a typical month", format=".1f"),
-    ]
-    if air_min is not None:
-        month_tooltip.insert(2, alt.Tooltip("windy:Q", title="% with the wind alone", format=".0f"))
-
-    # Defaults to the best month; a click anywhere in a column picks another.
-    pick_month = alt.selection_point(
-        name="month_click", fields=["month"], on="click", value=[{"month": best_month}],
-    )
-    x_month = alt.X("name:N", sort=month_names, title=None, axis=alt.Axis(labelAngle=0))
-    # The picked month gets a soft band behind it rather than dimming the rest,
-    # so every bar keeps its true colour.
-    layers = [
-        alt.Chart(month_data)
-        .mark_bar(size=44, color=WATER_SHADE)
-        .encode(x=x_month, y=alt.value(0), y2=alt.value(alt.expr("height")),
-                opacity=alt.condition(pick_month, alt.value(0.14), alt.value(0.0)))
-    ]
-    if air_min is not None:
-        layers.append(
-            alt.Chart(month_data.assign(series=COLD_LABEL))
-            .mark_bar(size=22, **bar_style)
-            .encode(x=x_month, y=alt.Y("windy:Q", title="% of days"),
-                    color=alt.Color("series:N", scale=series, title=None,
-                                    legend=alt.Legend(orient="top")))
-        )
-    layers.append(
-        alt.Chart(month_data.assign(series=GOOD_LABEL))
-        # The surface-coloured ring keeps the orange apart from the blue behind it.
-        .mark_bar(size=22, **bar_style, stroke=SURFACE, strokeWidth=2)
-        .encode(x=x_month, y=alt.Y("good:Q", title="% of days"), color=good_color)
-    )
-    # Invisible full-height columns on top: the click and hover target, so a
-    # month is easy to hit even where its bar is short.
-    layers.append(
-        alt.Chart(month_data)
-        .mark_bar(size=44, opacity=0)
-        .encode(x=x_month, y=alt.value(0), y2=alt.value(alt.expr("height")),
-                tooltip=month_tooltip)
-        .add_params(pick_month)
-    )
-
-    with chart_col:
-        st.markdown("**Month by month**")
-        event = st.altair_chart(
-            alt.layer(*layers).properties(height=300), width="stretch",
-            on_select="rerun", key="month_pick",
-        )
-        clicked = (event.selection or {}).get("month_click") or []
-        selected = clicked[0]["month"] if clicked else best_month
-        st.caption("Click a month to see its day and its wind →")
-
-    with hour_col:
-        st.markdown(f"**{calendar.month_name[selected]} through the day**")
-        draw_hours(odds["hour"].loc[selected])
-else:
-    # Day by day across your dates: in how many of the years each one had it.
-    order = window_days(DATES)
-    by_day = (
-        days.groupby([days.index.month.rename("month"), days.index.day.rename("day")]).mean()
-        .reindex(pd.MultiIndex.from_tuples(order, names=["month", "day"])) * 100
-    )
-    day_data = pd.DataFrame({
-        "day": axis_dates([m for m, _ in order], [d for _, d in order], DATES),
-        "name": [f"{d} {calendar.month_abbr[m]}" for m, d in order],
-        "good": by_day["good"].fillna(0).to_numpy(),
-        "windy": by_day["windy"].fillna(0).to_numpy(),
-    })
-    # Each day sits centred on its tick: the hover column spans the whole day,
-    # the bar most of it, leaving a sliver of background between bars.
-    day_data["day_start"] = day_data["day"] - pd.Timedelta(hours=12)
-    day_data["day_end"] = day_data["day"] + pd.Timedelta(hours=12)
-    day_data["bar_from"] = day_data["day"] - pd.Timedelta(hours=8)
-    day_data["bar_to"] = day_data["day"] + pd.Timedelta(hours=8)
-    x_day = alt.X("bar_from:T", title=None, axis=day_axis())
-    day_tooltip = [
-        alt.Tooltip("name:N", title="day"),
-        alt.Tooltip("good:Q", title="% of years with it", format=".0f"),
-    ]
-    if air_min is not None:
-        day_tooltip.append(alt.Tooltip("windy:Q", title="% with the wind alone", format=".0f"))
-    # A ring like the months' only while the bars are wide enough to keep it.
-    ring = dict(stroke=SURFACE, strokeWidth=2) if window_length <= 45 else {}
-
-    layers = []
-    if air_min is not None:
-        layers.append(
-            alt.Chart(day_data.assign(series=COLD_LABEL))
-            .mark_bar(**bar_style)
-            .encode(x=x_day, x2="bar_to:T", y=alt.Y("windy:Q", title="% of years"),
-                    y2=alt.datum(0),
-                    color=alt.Color("series:N", scale=series, title=None,
-                                    legend=alt.Legend(orient="top")))
-        )
-    layers += [
-        alt.Chart(day_data.assign(series=GOOD_LABEL))
-        .mark_bar(**bar_style, **ring)
-        .encode(x=x_day, x2="bar_to:T", y=alt.Y("good:Q", title="% of years"),
-                y2=alt.datum(0), color=good_color),
-        alt.Chart(pd.DataFrame({"pct": [overall]}))
-        .mark_rule(color=theme_colors()["fg"], strokeDash=[4, 4], opacity=0.6)
-        .encode(y="pct:Q"),
-        alt.Chart(day_data)
-        .mark_bar(opacity=0)
-        .encode(x="day_start:T", x2="day_end:T", y=alt.value(0), y2=alt.value(alt.expr("height")),
-                tooltip=day_tooltip),
-    ]
-    with chart_col:
-        st.markdown("**Day by day**")
-        st.altair_chart(alt.layer(*layers).properties(height=300), width="stretch")
-        st.caption(
-            f"In how many of the years each day had it. Dashed: {percent(overall)}, "
-            "the chance on any one of your dates."
-        )
-
-    with hour_col:
-        st.markdown(f"**{dates_label(DATES)} through the day**")
-        draw_hours(odds["dates_hour"])
-
-st.divider()
-spot_ranking()
-
-st.divider()
-year_col, rose_col = st.columns([3, 2], gap="medium")
-
-with year_col:
-    st.markdown("**Year by year**")
-    if DATES is None:
-        year_data = odds["year"].rename("pct").reset_index()
-        year_data["name"] = [calendar.month_abbr[m] for m in year_data["month"]]
-        years_shown = year_data["year"].nunique()
-        st.altair_chart(
-            alt.Chart(year_data)
-            .mark_rect(stroke=SURFACE, strokeWidth=2 if years_shown <= 30 else 1)
-            .encode(
-                x=alt.X("name:N", sort=month_names, title=None,
-                        axis=alt.Axis(labelAngle=0, orient="top")),
-                y=alt.Y("year:O", sort="descending", title=None,
-                        axis=alt.Axis(labelOverlap="greedy")),
-                color=alt.Color(
-                    "pct:Q", title="% of days",
-                    scale=alt.Scale(range=CHANCE_RAMP, domain=[0, max(1.0, year_data["pct"].max())]),
-                    legend=alt.Legend(orient="bottom", gradientLength=220),
-                ),
-                tooltip=[alt.Tooltip("year:O"), alt.Tooltip("name:N", title="month"),
-                         alt.Tooltip("pct:Q", title="% of days with it", format=".0f")],
-            )
-            .properties(height=min(max(16 * years_shown, 180), 520)),
-            width="stretch",
-        )
-        st.caption("One square per month of each year: the brighter, the more days had it.")
-    else:
-        # One square per day of each year, so runs of good days and lean
-        # years show for what they are.
-        cells = days[~((days.index.month == 2) & (days.index.day == 29))]
-        kinds = (
-            {"Had it": GOOD_COLOR, "Did not": MISS_COLOR} if air_min is None
-            else {GOOD_LABEL: GOOD_COLOR, COLD_LABEL: COLD_COLOR, "Neither": MISS_COLOR}
-        )
-        labels = list(kinds)
-        heat = pd.DataFrame({
-            "day": axis_dates(cells.index.month, cells.index.day, DATES),
-            "year": window_year(cells.index, DATES),
-            "date": [f"{d.day} {calendar.month_abbr[d.month]} {d.year}" for d in cells.index],
-            "hit": cells["good"].to_numpy(),
-            "status": np.where(
-                cells["good"], labels[0],
-                np.where(cells["windy"], labels[1], labels[-1]),
-            ),
-        })
-        heat["day_start"] = heat["day"] - pd.Timedelta(hours=12)
-        heat["day_end"] = heat["day"] + pd.Timedelta(hours=12)
-        heat["count"] = heat.groupby("year")["hit"].transform("sum")
-        years_shown = heat["year"].nunique()
-        st.altair_chart(
-            alt.Chart(heat)
-            .mark_rect(stroke=SURFACE, strokeWidth=1 if window_length <= 45 else 0)
-            .encode(
-                x=alt.X("day_start:T", title=None, axis=day_axis(orient="top")),
-                x2="day_end:T",
-                y=alt.Y("year:O", sort="descending", title=None,
-                        axis=alt.Axis(labelOverlap="greedy")),
-                color=alt.Color(
-                    "status:N", title=None,
-                    scale=alt.Scale(domain=labels, range=list(kinds.values())),
-                    legend=alt.Legend(orient="bottom"),
-                ),
-                tooltip=[alt.Tooltip("date:N", title="day"),
-                         alt.Tooltip("status:N", title="had it"),
-                         alt.Tooltip("count:Q", title=f"days that year, of {window_length}")],
-            )
-            .properties(height=min(max(16 * years_shown, 180), 520)),
-            width="stretch",
-        )
-        st.caption("One square per day of each year. Hover for how many days that year had it.")
-
-with rose_col:
-    if DATES is None:
-        in_month = odds["on_month"] == selected
-        when, direction, knots = (
-            calendar.month_name[selected], odds["direction"][in_month], odds["knots"][in_month],
-        )
-    else:
-        when, direction, knots = dates_label(DATES), odds["direction"], odds["knots"]
-    if len(direction):
-        st.markdown(
-            f"**{when}** · when it is on, the wind comes from "
-            f"**{prevailing_direction(direction)}**"
-        )
-        st.pyplot(
-            draw_rose(direction, knots, ACTIVITIES[activity]["ladder"], "knots"),
-            width="stretch",
-        )
-    else:
-        st.info(f"No hours like that in {when}.")
-    # The rose says which way; the map says if that way is water.
-    locator_map(LATITUDE, LONGITUDE, key="explore_map", height=210, cell=not STATION)
-
-
-# --- The numbers behind the charts (sidebar) ------------------------------
-# Kept out of the main page so the charts end cleanly.
-
-with st.sidebar.expander("The numbers"):
-    if DATES is None:
-        table = pd.DataFrame({
-            "Month": month_names,
-            "With it %": month_data["good"].round(0),
-            "Days": month_data["days"].round(1),
-        })
-        if air_min is not None:
-            table.insert(2, "Wind alone %", month_data["windy"].round(0))
-    else:
-        table = pd.DataFrame({"Day": day_data["name"], "With it %": day_data["good"].round(0)})
-        if air_min is not None:
-            table["Wind alone %"] = day_data["windy"].round(0)
-    st.dataframe(table, hide_index=True, width="stretch")
-    per_day = days.rename(columns={"good": "with_it", "windy": "wind_alone"})
-    per_day.index = per_day.index.date
-    st.download_button(
-        ":material/download: Every day as CSV",
-        per_day.rename_axis("date").to_csv().encode(),
-        file_name=(
-            f"days-{STATION}.csv" if STATION
-            else f"days-{LATITUDE:+.2f}_{LONGITUDE:+.2f}.csv"
-        ),
-        mime="text/csv",
-    )

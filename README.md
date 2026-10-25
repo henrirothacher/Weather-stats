@@ -1,14 +1,18 @@
 # Wind atlas
 
 Pick any point on earth or any Swiss weather station, pull its wind
-history, and see whether it is worth sailing — by month, by time of day,
-and against another spot.
+history, and see whether it is worth sailing — by month and by time of
+day.
 
 Built with Streamlit on two sources, picked on the start screen:
 
 - **ERA5** — ECMWF's reanalysis, hourly, 1940–present, 0.25° grid, anywhere.
 - **MeteoSwiss** — measured hourly wind from the ~150 SwissMetNet stations,
   most since 1981 (open data, CC BY 4.0).
+
+A spot you have not named is called after the nearest well-known town, from
+[GeoNames](https://www.geonames.org/) (towns of 15,000 people or more,
+CC BY 4.0).
 
 ## Run locally
 
@@ -40,4 +44,5 @@ when the app restarts.
 - `data/station_<code>.nc` — one MeteoSwiss station per file, converted to
   the same layout (`u10`, `v10`, `t2m` on `valid_time`)
 - `data/locations.json` — names you have given those cells
+- `data/places.csv` — GeoNames towns, to name the cells you have not
 - `.streamlit/config.toml` — theme
