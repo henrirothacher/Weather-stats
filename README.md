@@ -21,9 +21,11 @@ start screen shows them all, for lakes too small for Natural Earth. A
 MeteoSwiss station that measures no air temperature borrows it from the
 nearest one that does, corrected for the difference in height.
 
-A spot you have not named is called after the nearest well-known town, from
+A spot you have not named is called after the water it lies on, from
+Natural Earth's named seas and lakes, and the town nearby, from
 [GeoNames](https://www.geonames.org/) (towns of 15,000 people or more,
-CC BY 4.0).
+CC BY 4.0): "Lake Balaton near Tapolca", "Strait of Gibraltar, 26 km N of
+Tangier".
 
 ## Run locally
 
@@ -59,4 +61,6 @@ when the app restarts.
 - `data/places.csv` — GeoNames towns, to name the cells you have not
 - `data/shores.npy` — every coast and lake shore point, to the nearest
   0.01°; the app builds it from Natural Earth when it is missing
+- `data/waters.npz` — the outlines of Natural Earth's named seas and lakes,
+  to name spots after their water; built the same way
 - `.streamlit/config.toml` — theme

@@ -14,6 +14,7 @@ import altair as alt
 import cdsapi
 import folium
 import matplotlib.pyplot as plt
+from matplotlib.path import Path as Outline
 import numpy as np
 import pandas as pd
 import requests
@@ -673,6 +674,12 @@ SHORE_KM = 10
 SHORES = data_dir / "shores.npy"
 NATURAL_EARTH = "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson"
 SHORE_LAYERS = ["coastline", "lakes", "lakes_europe", "lakes_north_america"]
+# The named seas and lakes, to call a spot after the water it lies on.
+WATERS = data_dir / "waters.npz"
+WATER_LAYERS = {"geography_marine_polys": "sea", "lakes": "lake", "lakes_europe": "lake",
+                "lakes_north_america": "lake"}
+# A lake's name that does not say it is one gets "Lake" put before it.
+LAKE_WORDS = r"(?i)\b(lake|lac|lago|laguna|lagoon|lough|loch|reservoir)\b|(see|sjön|järvi|jezero)$"
 
 
 def cds_client():
@@ -762,10 +769,15 @@ def metar_stations():
     table = pd.read_csv(io.BytesIO(response.content), keep_default_na=False, na_values=[""])
     table = table[table["iem_network"].str.endswith("ASOS")].dropna(subset=["begints"])
     table = table.drop_duplicates("stid").set_index("stid")
-    # American names come in capitals: BANGOR INTL ARPT.
-    names = table["station_name"].where(
-        ~table["station_name"].str.isupper(), table["station_name"].str.title()
+    # Names come in many hands: BANGOR INTL ARPT, SMITH_FIELD/BEAUFORT_(ASOS).
+    names = (
+        table["station_name"].str.replace("_", " ")
+        .str.replace(r"\((?:ASOS|AWOS|AUT)\)|\bARPT\b|\bAIRPOR\b", " ", regex=True)
+        .str.replace(r"\s+", " ", regex=True).str.strip(" /-")
     )
+    names = names.where(~names.str.isupper() & ~names.str.islower(), names.str.title())
+    for short, word in {"Intl": "International", "Muni": "Municipal", "Rgnl": "Regional"}.items():
+        names = names.str.replace(rf"\b{short}\b", word, regex=True)
     table = pd.DataFrame({
         "name": names, "lat": table["lat"], "lon": table["lon"], "height": table["elev"],
         "since": pd.to_datetime(table["begints"]).dt.year,
@@ -791,10 +803,12 @@ def town_table():
 
 @st.cache_data(show_spinner=False)
 def place_name(latitude, longitude):
-    """Where a point is, as people would say it: 'Zürich, Switzerland' in a
-    town, '33 km E of Valencia, Spain' near one. Within 250 km a big town is
+    """Where a point is, as a sailor would say it. On a lake or a sea, its
+    name and the town nearby: 'Lake Balaton near Tapolca', 'Caribbean Sea,
+    62 km SE of Les Abymes'. On land, the town: 'Zürich, Switzerland'
+    in it, '33 km E of Valencia, Spain' near it. Within 250 km a big town is
     worth going a little further for than a small one (ten times the people
-    for each 40 km); past that, the nearest of any size."""
+    for each 20 km); past that, the nearest of any size."""
     if not PLACES.exists():
         return coords_label(latitude, longitude)
     towns, lat, lon, size = town_table()
@@ -803,25 +817,30 @@ def place_name(latitude, longitude):
         np.sin((lat - here) / 2) ** 2 + np.cos(here) * np.cos(lat) * np.sin((lon - east) / 2) ** 2
     ))
     near = km < 250
-    index = int(np.argmax(np.where(near, size - km / 40, -np.inf)) if near.any() else np.argmin(km))
+    index = int(np.argmax(np.where(near, size - km / 20, -np.inf)) if near.any() else np.argmin(km))
     town = towns.iloc[index]
-    where = f"{town['name']}, {town['country']}"
-    if km[index] < 10:
-        return where
     # Which way the point lies from the town, on eight points of the compass.
     bearing = np.degrees(np.arctan2(
         np.sin(east - lon[index]) * np.cos(here),
         np.cos(lat[index]) * np.sin(here)
         - np.sin(lat[index]) * np.cos(here) * np.cos(east - lon[index]),
     ))
-    return f"{km[index]:,.0f} km {COMPASS[::2][round(bearing % 360 / 45) % 8]} of {where}"
+    way = f"{km[index]:,.0f} km {COMPASS[::2][round(bearing % 360 / 45) % 8]} of {town['name']}"
+    water = water_name(latitude, longitude)
+    if water:
+        return f"{water} near {town['name']}" if km[index] < 25 else f"{water}, {way}"
+    return f"{town['name']}, {town['country']}" if km[index] < 10 else f"{way}, {town['country']}"
+
+
+# What a spot nobody named is saved as: its coordinates, or where it was
+# said to be before names knew the water, '26 km N of Tangier, Morocco'.
+UNNAMED = r"[+-]?\d+(\.\d+)?, *[+-]?\d+(\.\d+)?|[\d,]+ km [NESW]{1,2} of [^,]+, [^,]+"
 
 
 def spot_title(spot):
-    """A spot's name, or where it is when its name is only its coordinates,
-    which is what a spot nobody named is called."""
+    """A spot's name, or where it is when nobody named it."""
     name = spot["name"]
-    if re.fullmatch(r"[+-]?\d+(\.\d+)?, *[+-]?\d+(\.\d+)?", name.strip()):
+    if re.fullmatch(UNNAMED, name.strip()):
         return place_name(float(spot["lat"]), float(spot["lon"]))
     return name
 
@@ -900,6 +919,70 @@ def by_a_shore(stations):
         band = points[low:high]
         near.append(bool((km_from(latitude, longitude, band[:, 0], band[:, 1]) <= SHORE_KM).any()))
     return pd.Series(near, index=stations.index)
+
+
+def water_label(properties, kind):
+    """A sea or lake's name as a sailor says it: oceans without their North
+    and South, capitals tamed, and Lake before a lake that does not say so."""
+    name = properties.get("name_en") or properties.get("name")
+    if properties.get("featurecla") == "ocean":
+        return re.sub(r"^(North|South) ", "", name.title())
+    name = name.title() if name.isupper() else name
+    return f"Lake {name}" if kind == "lake" and not re.search(LAKE_WORDS, name) else name
+
+
+@st.cache_resource(show_spinner="Naming the world's waters...")
+def waters():
+    """Every named sea and lake as (name, kind, outline, bounds), outlines in
+    longitude and latitude to the nearest hundredth of a degree, bounds as
+    west, south, east, north. Built from Natural Earth the first time and
+    kept in data/."""
+    if not WATERS.exists():
+        names, kinds, outlines = [], [], []
+        for layer, kind in WATER_LAYERS.items():
+            response = requests.get(f"{NATURAL_EARTH}/ne_10m_{layer}.geojson", timeout=120)
+            response.raise_for_status()
+            for feature in response.json()["features"]:
+                properties, geometry = feature["properties"], feature["geometry"]
+                if not geometry or not (properties.get("name_en") or properties.get("name")):
+                    continue
+                polygons = (
+                    [geometry["coordinates"]] if geometry["type"] == "Polygon"
+                    else geometry["coordinates"]
+                )
+                for polygon in polygons:
+                    names.append(water_label(properties, kind))
+                    kinds.append("ocean" if properties.get("featurecla") == "ocean" else kind)
+                    outlines.append(np.round(np.asarray(polygon[0])[:, :2] * 100))
+        np.savez_compressed(
+            WATERS, names=names, kinds=kinds, sizes=[len(outline) for outline in outlines],
+            points=np.concatenate(outlines).astype(np.int16),
+        )
+    stored = np.load(WATERS)
+    outlines = np.split(stored["points"] / 100, np.cumsum(stored["sizes"])[:-1])
+    return [
+        (str(name), str(kind), outline, (*outline.min(axis=0), *outline.max(axis=0)))
+        for name, kind, outline in zip(stored["names"], stored["kinds"], outlines)
+    ]
+
+
+def water_name(latitude, longitude):
+    """The water a point lies on: the nearest named lake or sea within
+    SHORE_KM, or else the ocean around it. None on land away from them."""
+    reach = SHORE_KM / 111  # in degrees of latitude
+    wide = reach / max(np.cos(np.radians(latitude)), 0.2)
+    nearest, ocean = (SHORE_KM, None), None
+    for name, kind, outline, (west, south, east, north) in waters():
+        if not (south - reach <= latitude <= north + reach and west - wide <= longitude <= east + wide):
+            continue
+        inside = Outline(outline).contains_point((longitude, latitude))
+        if kind == "ocean":
+            ocean = ocean or (name if inside else None)
+            continue
+        km = 0 if inside else km_from(latitude, longitude, outline[:, 1], outline[:, 0]).min()
+        if km <= nearest[0]:
+            nearest = (km, name)
+    return nearest[1] or ocean
 
 
 def save_station(spot, target, times, speed, bearing, celsius, credit, **details):

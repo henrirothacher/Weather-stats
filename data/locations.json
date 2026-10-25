@@ -95,5 +95,11 @@
     "station": "LEPA",
     "height": 8.0,
     "name": "Palma de Mallorca"
+  },
+  "+30.25_-87.25": {
+    "lat": 30.25,
+    "lon": -87.25,
+    "zone": "America/Chicago",
+    "name": "Gulf of Mexico near Pensacola"
   }
 }
