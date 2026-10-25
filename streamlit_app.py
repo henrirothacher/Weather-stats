@@ -644,22 +644,27 @@ data_dir = Path("data")
 data_dir.mkdir(exist_ok=True)
 REGISTRY = data_dir / "locations.json"
 
-# Where the wind comes from: a model cell anywhere on earth, or a MeteoSwiss
-# station that measured it. Both end up in the same file layout.
+# Where the wind comes from: a model cell anywhere on earth, or a station
+# that measured it, from MeteoSwiss or an airport's METAR reports. All end
+# up in the same file layout.
 SOURCES = {
     "era5": ":material/public: ERA5 · worldwide",
     "meteoswiss": ":material/sensors: MeteoSwiss · Swiss stations",
+    "metar": ":material/flight: METAR · airports worldwide",
 }
 # Each kind of station: what to call it, and the prefix of its file in data/.
-STATION_NAMES = {"meteoswiss": "MeteoSwiss"}
-STATION_FILES = {"meteoswiss": "station"}
+STATION_NAMES = {"meteoswiss": "MeteoSwiss", "metar": "METAR"}
+STATION_FILES = {"meteoswiss": "station", "metar": "metar"}
 # MeteoSwiss open data: free, no account, semicolon CSV per station.
 OGD_ROOT = "https://data.geo.admin.ch/ch.meteoschweiz.ogd-smn"
 OGD_ITEMS = "https://data.geo.admin.ch/api/stac/v1/collections/ch.meteoschweiz.ogd-smn/items"
+# METARs as the Iowa Environmental Mesonet archives them: free, no account,
+# one request a second at most.
+IEM = "https://mesonet.agron.iastate.edu"
 # Where a station map opens before you pick one, and how many of the
 # stations around what it looks at it draws.
 SWISS_CENTRE = (46.8, 8.2)
-STATION_ZOOM = {"meteoswiss": 8}
+STATION_ZOOM = {"meteoswiss": 8, "metar": 5}
 NEARBY_STATIONS = 200
 
 
@@ -733,6 +738,30 @@ def meteoswiss_stations():
     ).dt.year
     table["has_temp"] = table.index.isin(offered.get("tre200h0", set()))
     return table.sort_values("name")
+
+
+@st.cache_data(ttl="1d", show_spinner="Loading the METAR stations...")
+def metar_stations():
+    """Every airport the IEM archives METARs for, and since when. The list of
+    all its stations is one file; the airports are the networks ending ASOS."""
+    response = requests.get(
+        f"{IEM}/sites/networks.php",
+        params={"network": "_ALL_", "format": "csv", "nohtml": "on"}, timeout=120,
+    )
+    response.raise_for_status()
+    table = pd.read_csv(io.BytesIO(response.content), keep_default_na=False, na_values=[""])
+    table = table[table["iem_network"].str.endswith("ASOS")].dropna(subset=["begints"])
+    table = table.drop_duplicates("stid").set_index("stid")
+    # American names come in capitals: BANGOR INTL ARPT.
+    names = table["station_name"].where(
+        ~table["station_name"].str.isupper(), table["station_name"].str.title()
+    )
+    return pd.DataFrame({
+        "name": names, "lat": table["lat"], "lon": table["lon"], "height": table["elev"],
+        "since": pd.to_datetime(table["begints"]).dt.year,
+        # Every METAR carries the air temperature.
+        "has_temp": True,
+    }).sort_values("name")
 
 
 PLACES = data_dir / "places.csv"
@@ -879,6 +908,39 @@ def fetch_station(spot, target, progress=None):
     return save_station(
         spot, target, frame["time"], frame["fkl010h0"], frame["dkl010h0"],
         frame.get("tre200h0"), "MeteoSwiss SwissMetNet (CC BY 4.0)",
+    )
+
+
+def fetch_metar(spot, target):
+    """Every METAR the IEM holds for an airport, as one report an hour: the
+    one nearest the top of the hour. One request; it can take a minute."""
+    response = requests.get(f"{IEM}/cgi-bin/request/asos.py", params={
+        "station": spot["station"], "data": "drct,sknt,tmpc", "tz": "Etc/UTC",
+        "sts": "1900-01-01T00:00Z", "ets": f"{date.today()}T00:00Z",
+        # Routine reports and the specials sent between them.
+        "report_type": "3,4", "missing": "empty",
+    }, timeout=600)
+    response.raise_for_status()
+    frame = pd.read_csv(io.BytesIO(response.content)).dropna(subset=["sknt"])
+    stamp = pd.to_datetime(frame["valid"], format="%Y-%m-%d %H:%M")
+    hour = stamp.dt.round("h")
+    frame = (
+        frame.assign(time=hour, off=(stamp - hour).abs())
+        .sort_values("off").drop_duplicates("time").sort_values("time")
+    )
+    # Early years can hold as few as two reports a day, too few to tell a
+    # day's wind by, so the record starts in the first year with hourly ones.
+    year = frame["time"].dt.year
+    per_day = year.value_counts() / frame["time"].dt.normalize().groupby(year).nunique()
+    frame = frame[year >= per_day[per_day >= 10].index.min()]
+    if frame.empty:
+        raise RuntimeError("The IEM holds no hourly reports for this airport")
+    # A variable wind (VRB) has a speed but no direction. It is light, a
+    # knot or two, so it counts as calm rather than losing the hour.
+    variable = frame["drct"].isna()
+    return save_station(
+        spot, target, frame["time"], frame["sknt"].mask(variable, 0) / MS_TO_KNOTS,
+        frame["drct"].fillna(0), frame["tmpc"], "METAR, Iowa Environmental Mesonet",
     )
 
 
@@ -1532,11 +1594,21 @@ if st.session_state["spot"] is None:
     stations, stations_error = None, None
     if source != "era5":
         try:
-            stations = meteoswiss_stations()
+            stations = meteoswiss_stations() if source == "meteoswiss" else metar_stations()
         except Exception as error:
             stations_error = error
 
-    if source == "meteoswiss":
+    if source == "metar":
+        pitch = (
+            "Click near any airport in the world and pull every weather report it "
+            "has sent: wind measured beside the runway, most of it every half hour. "
+        )
+        facts = [
+            ("Hourly", "most since the 1970s"),
+            ("Measured", "not modelled"),
+            (f"{len(stations):,}" if stations is not None else "5,000+", "airports"),
+        ]
+    elif source == "meteoswiss":
         pitch = (
             "Click any MeteoSwiss weather station and pull every hour it has "
             "measured. Real readings from the shore rather than a 25 km model "
@@ -1675,8 +1747,8 @@ if st.session_state["spot"] is None:
                 else "Click a station, or anywhere for the nearest one"
             )
             world.get_root().html.add_child(folium.Element(f'<div class="map-hint">{hint}</div>'))
-            # The stations nearest where the map looks; the ones you have
-            # downloaded stand out.
+            # The stations nearest where the map looks (all of MeteoSwiss's, the
+            # airports around you); the ones you have downloaded stand out.
             on_disk = {entry["station"] for entry in saved.values() if entry.get("source") == source}
             near = km_from(*focus, stations["lat"], stations["lon"]).nsmallest(NEARBY_STATIONS).index
             for abbr, row in stations.loc[near].iterrows():
@@ -1861,6 +1933,22 @@ if nav.button(":material/home: Start over", type="tertiary"):
 
 
 # --- Stage 2: make sure this location has data ----------------------------
+
+if not dataset_path.exists() and STATION and spot["source"] == "metar":
+    st.subheader(f"Download the record for {LOCATION_NAME}")
+    st.caption(
+        f"METAR station {STATION} · {spot['height']:.0f} m · {LOCAL_TZ}. "
+        "Every report the airport has sent, from the Iowa Environmental Mesonet's "
+        "archive; no account needed. It can take a minute."
+    )
+    if st.button("Fetch the METARs", type="primary"):
+        with st.spinner("The Iowa Environmental Mesonet is gathering every report..."):
+            try:
+                fetch_metar(spot, dataset_path)
+                st.rerun()
+            except Exception as error:
+                st.error(f"Could not fetch that airport: {error}")
+    st.stop()
 
 if not dataset_path.exists() and STATION:
     st.subheader(f"Download the record for {LOCATION_NAME}")
