@@ -27,6 +27,10 @@ Natural Earth's named seas and lakes, and the town nearby, from
 CC BY 4.0): "Lake Balaton near Tapolca", "Strait of Gibraltar, 26 km N of
 Tangier".
 
+Comparing spots keeps to one kind by default, stations with stations and
+ERA5 cells with ERA5 cells; a switch opens it to all, in explore's settings
+and in the trip planner's comparison.
+
 ## Run locally
 
 ```bash

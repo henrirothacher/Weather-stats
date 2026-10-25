@@ -30,7 +30,7 @@ st.set_page_config(
 )
 
 # Goes up by 0.1 with every commit pushed to GitHub (2.9 -> 3.0).
-APP_VERSION = "2.4"
+APP_VERSION = "2.5"
 
 def svg_image(markup, view_box, css_class=""):
     """A drawing for st.html. Its sanitiser drops <svg> outright but lets an
@@ -632,6 +632,8 @@ LOOKBACK = {"10 years": 10, "20 years": 20, "All": None}
 DEFAULT_HOURS = (10, 17)
 DEFAULT_LASTING = 2
 DEFAULT_YEARS = "20 years"
+# Stations beside stations and ERA5 cells beside ERA5 cells, unless you say otherwise.
+DEFAULT_LIKE_WITH_LIKE = True
 THRESHOLD_COLORS = ["#8ecae6", "#ffb703", "#fb8500", "#9d0208"]
 
 COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
@@ -3004,7 +3006,39 @@ def settings(mode):
         side_dates("trip_dates", coming_dates(*TRIP_DAYS), YEAR_ROWS_UP_TO)
     remembered(side.segmented_control, "Years", list(LOOKBACK), required=True,
                key="years", default=DEFAULT_YEARS, start="default")
+    # The trip planner asks this in its own comparison panel instead.
+    if mode == "explore":
+        side.subheader("Compare")
+        ask_kind(side)
     return activity
+
+
+def ask_kind(place):
+    """Which spots to set beside this one, drawn in `place`: its own kind
+    only, or every spot you have downloaded."""
+    remembered(
+        place.segmented_control, "Compare this spot with", [True, False], required=True,
+        format_func=lambda same: ("Stations only" if STATION else "ERA5 cells only") if same
+        else "All spots",
+        key="like_with_like", default=DEFAULT_LIKE_WITH_LIKE, start="default",
+        help="Stations (MeteoSwiss and airports) beside stations, ERA5 cells beside ERA5 "
+        "cells, or every spot you have downloaded. A station measures the wind where it "
+        "stands; ERA5 averages a 25 km cell, which smooths it out.",
+    )
+
+
+def own_kind():
+    """What this spot is, said in the plural: stations or ERA5 cells."""
+    return "stations" if STATION else "ERA5 cells"
+
+
+def comparable(spots):
+    """The spots to set beside this one: all of them, or only those of its
+    own kind, measured or modelled, as the Compare setting says."""
+    if not kept("like_with_like", DEFAULT_LIKE_WITH_LIKE):
+        return spots
+    return {key: entry for key, entry in spots.items()
+            if bool(entry.get("station")) == bool(STATION)}
 
 
 # --- Shared by explore and the trip planner ------------------------------
@@ -3116,45 +3150,76 @@ ANSWER_CSS = """
     animation-delay: calc(var(--lag, 0s) + var(--d) * .3s);
 }
 .legend b { color: #e8eef5; }
-.st-key-trip_compare_pick { max-width: 620px; animation: riseIn .5s ease 2.6s both; }
-.cmp-verdict { margin: .4rem 0 .2rem; font-size: .98rem; color: #a9b6c3; animation: riseIn .4s ease both; }
+
+/* The way down to the comparison, under the trip's title. */
+.jump {
+    display: inline-flex; align-items: center; gap: .55rem; margin-top: 1rem;
+    padding: .5rem 1.1rem; border: 1px solid rgba(251, 133, 0, .65); border-radius: 999px;
+    background: rgba(251, 133, 0, .1); color: #ffb703 !important;
+    font-size: .92rem; font-weight: 700; text-decoration: none !important;
+    animation: riseIn .5s ease .5s both; transition: background .2s ease, border-color .2s ease;
+}
+.jump:hover { background: rgba(251, 133, 0, .2); border-color: #fb8500; }
+.jump span { transition: transform .2s ease; }
+.jump:hover span { transform: translateY(3px); }
+#compare { scroll-margin-top: 7rem; }
+
+/* The comparison: a panel of its own, then a card per spot, best first. */
+.st-key-compare_panel {
+    margin-top: 2.4rem; padding: 1.7rem 1.8rem 1.9rem !important;
+    border: 1px solid rgba(251, 133, 0, .55); border-radius: 14px;
+    background: linear-gradient(180deg, rgba(251, 133, 0, .08), transparent 260px), #0d1319;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, .3);
+    animation: riseIn .6s ease 2.3s both;
+}
+.cmp-title {
+    margin-top: .35rem; font-size: clamp(1.7rem, 3.4vw, 2.4rem); font-weight: 800;
+    line-height: 1.1; letter-spacing: -.035em; color: #e8eef5;
+}
+.cmp-title em { font-style: normal; color: #fb8500; }
+.cmp-verdict {
+    margin: .4rem 0 .3rem; font-size: 1.15rem; font-weight: 700; color: #e8eef5;
+    animation: riseIn .4s ease both;
+}
 .cmp-verdict b { color: #fb8500; }
-.cmp-card {
-    box-sizing: border-box; height: 100%; padding: 1rem 1.1rem 1.1rem;
-    border: 1px solid #26333f; border-radius: 8px; background: #0d1319;
-    animation: riseIn .5s cubic-bezier(.2, .7, .3, 1) both; animation-delay: calc(var(--r) * 90ms);
+.cmp-hint { margin-top: .2rem; font-size: .9rem; color: #8b98a5; }
+[class*="st-key-cmp_"] {
+    padding: 1.05rem 1.15rem 1.1rem !important; border: 1px solid #26333f; border-radius: 10px;
+    background: #111922; animation: riseIn .5s cubic-bezier(.2, .7, .3, 1) both;
 }
-.cmp-card.top {
-    border-color: rgba(251, 133, 0, .6);
-    background: linear-gradient(180deg, rgba(251, 133, 0, .08), transparent 60%), #0d1319;
+[class*="st-key-cmp_top"] {
+    border-color: rgba(251, 133, 0, .7);
+    background: linear-gradient(180deg, rgba(251, 133, 0, .12), transparent 70%), #111922;
 }
-.cmp-tags { display: flex; gap: .6rem; min-height: 1rem; }
+.cmp-tags { display: flex; align-items: center; gap: .55rem; min-height: 1.3rem; }
 .cmp-tags span {
     font-size: .62rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
     color: #8b98a5;
 }
-.cmp-card.top .cmp-tags span:last-child { color: #fb8500; }
+.cmp-tags .rank {
+    display: inline-grid; place-items: center; width: 1.35rem; height: 1.35rem;
+    border: 1px solid #26333f; border-radius: 4px; background: #141c25;
+    font-size: .7rem; letter-spacing: 0; color: #ffb703;
+}
+.cmp-tags .lead { color: #fb8500; }
 .cmp-name {
-    margin-top: .3rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
-    font-size: 1.05rem; font-weight: 700; color: #e8eef5;
+    margin-top: .45rem; font-size: 1.12rem; font-weight: 700; line-height: 1.25; color: #e8eef5;
+    /* Up to two lines, so a long name keeps its place name. */
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
 }
-.cmp-big { margin-top: .45rem; font-size: .9rem; color: #a9b6c3; }
+.cmp-source { margin-top: .1rem; font-size: .76rem; color: #5b6b7a; }
+.cmp-big { margin-top: .6rem; font-size: .92rem; color: #a9b6c3; }
 .cmp-big b {
-    margin-right: .15rem; font-size: 2.2rem; font-weight: 800; letter-spacing: -.04em;
-    color: #e8eef5; font-variant-numeric: tabular-nums;
+    margin-right: .2rem; font-size: 2.6rem; font-weight: 800; letter-spacing: -.04em;
+    line-height: 1; color: #e8eef5; font-variant-numeric: tabular-nums;
 }
-.cmp-card.top .cmp-big b { color: #fb8500; }
-.cmp-bar { height: 6px; margin: .5rem 0 .85rem; border-radius: 3px; background: #141c25; overflow: hidden; }
-.cmp-bar i {
-    display: block; width: var(--v); height: 100%; border-radius: 3px; background: #e37100;
-    transform-origin: left; animation: bandGrow .7s cubic-bezier(.2, .7, .3, 1) both;
-    animation-delay: calc(var(--r) * 90ms + .25s);
-}
-.cmp-facts { display: grid; gap: .3rem; font-size: .84rem; color: #a9b6c3; }
+[class*="st-key-cmp_top"] .cmp-big b { color: #fb8500; }
+.cmp-card .band { height: 8px; margin: .7rem 0 .9rem; }
+.cmp-facts { display: grid; gap: .32rem; font-size: .85rem; color: #a9b6c3; }
 .cmp-facts b { color: #e8eef5; }
 
 @media (prefers-reduced-motion: reduce) {
-    .dot-cells i, .spot-bar i, .band i, .cmp-bar i { animation: none !important; }
+    .dot-cells i, .spot-bar i, .band i { animation: none !important; }
     .answer-num.count { animation: none; counter-reset: num var(--to); }
 }
 </style>
@@ -3285,7 +3350,6 @@ EXTRAS = {
     "day": "Through the day",
     "years": "Year by year",
     "air": "Air temperature",
-    "spots": "Your other spots",
     "numbers": "The numbers",
 }
 MONTHS = [calendar.month_abbr[month] for month in range(1, 13)]
@@ -3412,12 +3476,15 @@ def air_chart(by_month):
 if st.session_state["mode"] == "explore":
     st.html(ANSWER_CSS)
     activity = settings("explore")
+    # Under the Compare heading settings() ends on, so comparing sits together.
+    compare = remembered(st.sidebar.toggle, "Show your other spots", key="show_spots",
+                         default=False)
     st.sidebar.subheader("Show more")
     shown = {
         key for key, label in EXTRAS.items()
         if (key != "air" or HAS_TEMP)
         and remembered(st.sidebar.toggle, label, key=f"show_{key}", default=False)
-    }
+    } | ({"spots"} if compare else set())
     ladder = ACTIVITIES[activity]["ladder"]
     wind = tuple(kept(f"wind_{activity}", ACTIVITIES[activity]["groove"]))
     hours = tuple(kept("hours", DEFAULT_HOURS))
@@ -3534,7 +3601,8 @@ if st.session_state["mode"] == "explore":
 
     if "spots" in shown:
         st.divider()
-        spots = downloaded_locations()
+        spots = comparable(downloaded_locations())
+        kind = own_kind()[:-1] if kept("like_with_like", DEFAULT_LIKE_WITH_LIKE) else "spot"
         names = spot_names(spots)
         rows = []
         with st.spinner("Counting days at your other spots..."):
@@ -3547,18 +3615,24 @@ if st.session_state["mode"] == "explore":
         rows.sort(reverse=True)
         rank = next((place for place, row in enumerate(rows, 1) if row[2]), None)
         section(
-            "The best of your spots" if rank == 1
+            "Your other spots" if len(rows) < 2
+            else "The best of your spots" if rank == 1
             else f"{ordinal(rank)} of your {len(rows)} spots" if rank
             else f"Your {len(rows)} spots side by side",
-            "the same wind and hours at every spot you have downloaded, each in its own local time",
+            f"the same wind and hours at every {kind} you have downloaded, "
+            "each in its own local time",
         )
-        st.html('<div class="spots">' + "".join(
-            f'<div class="spot-row{" here" if here_spot else ""}" style="--r:{index}">'
-            f'<span class="spot-name" title="{html.escape(name)}">{html.escape(name)}</span>'
-            f'<span class="spot-bar"><i style="--v:{pct:.1f}%"></i></span>'
-            f'<span class="spot-num">{pct / 100 * 365:.0f} days a year</span></div>'
-            for index, (pct, name, here_spot) in enumerate(rows)
-        ) + "</div>")
+        if len(rows) < 2:
+            st.info(f"No other {kind} downloaded yet to compare with. Pick one on the map, "
+                    "or compare with all spots under Compare, in the settings.")
+        else:
+            st.html('<div class="spots">' + "".join(
+                f'<div class="spot-row{" here" if here_spot else ""}" style="--r:{index}">'
+                f'<span class="spot-name" title="{html.escape(name)}">{html.escape(name)}</span>'
+                f'<span class="spot-bar"><i style="--v:{pct:.1f}%"></i></span>'
+                f'<span class="spot-num">{pct / 100 * 365:.0f} days a year</span></div>'
+                for index, (pct, name, here_spot) in enumerate(rows)
+            ) + "</div>")
 
     if "numbers" in shown:
         st.divider()
@@ -3588,7 +3662,7 @@ if st.session_state["mode"] == "explore":
 # Your spot on set dates, a regatta or a week away: when, the wind you need
 # and your hours on the water, one at a time. Where is the spot you picked.
 # Then what those dates have brought in the years on record, built up a
-# piece at a time, and the same dates at up to three of your other spots,
+# piece at a time, and the same dates at your other spots side by side,
 # should this one disappoint.
 
 TRIP_QUESTIONS = [
@@ -3596,7 +3670,6 @@ TRIP_QUESTIONS = [
     ("Wind", "How much wind do you need?"),
     ("On the water", "When are you on the water?"),
 ]
-COMPARE_UP_TO = 3
 # Your hours on the water as too light, right and too strong.
 BANDS = {
     "light": ("Too light", "#3a4a5a"),
@@ -3643,17 +3716,18 @@ def wind_bands(outlook):
     return {"light": light, "good": 100 - light - strong, "strong": strong}
 
 
-def band_bar(bands):
-    """Your hours on the water as one bar, too light to too strong."""
+def band_bar(bands, legend=True):
+    """Your hours on the water as one bar, too light to too strong, each
+    share named beneath it unless `legend` is off."""
     parts = "".join(
         f'<i style="width:{share}%;background:{BANDS[kind][1]};--d:{order}"></i>'
         for order, (kind, share) in enumerate(bands.items()) if share > 0
     )
-    legend = "".join(
+    named = "".join(
         f'<span style="--c:{BANDS[kind][1]}">{BANDS[kind][0]} <b>{share}%</b></span>'
         for kind, share in bands.items()
     )
-    return f'<div class="band">{parts}</div><div class="legend">{legend}</div>'
+    return f'<div class="band">{parts}</div>' + (f'<div class="legend">{named}</div>' if legend else "")
 
 
 def swap_trip(entry, key, where, chosen):
@@ -3664,13 +3738,13 @@ def swap_trip(entry, key, where, chosen):
     st.session_state["trip_compare"] = [where, *[other for other in chosen if other != key]]
 
 
-def compare_card(name, outlook, length, tags, index):
-    """One spot on your dates, to set beside the others."""
+def compare_card(name, credit, outlook, length, rank, tags):
+    """One spot on your dates, to set beside the others: its place among
+    them, the days that bring your wind, and how the wind and air run."""
     days = outlook["days"]
     if not len(days) or outlook["knots"] is None:
         body = '<div class="cmp-facts"><span>No record on these dates.</span></div>'
     else:
-        count = typical_days(days, length)
         bands = wind_bands(outlook)
         low, _, high = outlook["knots"]
         facts = [
@@ -3682,14 +3756,17 @@ def compare_card(name, outlook, length, tags, index):
             else "No air temperature",
         ]
         body = (
-            f'<div class="cmp-big"><b>{count}</b> of {length} days</div>'
-            f'<div class="cmp-bar"><i style="--v:{count / length * 100:.0f}%"></i></div>'
-            f'<div class="cmp-facts">{"".join(f"<span>{fact}</span>" for fact in facts)}</div>'
+            f'<div class="cmp-big"><b>{typical_days(days, length)}</b>of {length} days</div>'
+            + band_bar(bands, legend=False)
+            + f'<div class="cmp-facts">{"".join(f"<span>{fact}</span>" for fact in facts)}</div>'
         )
+    badges = (f'<span class="rank">{rank}</span>' if rank else "") + "".join(
+        f'<span class="{"lead" if tag == "Most days" else ""}">{tag}</span>' for tag in tags
+    )
     return (
-        f'<div class="cmp-card{" top" if "Most days" in tags else ""}" style="--r:{index}">'
-        f'<div class="cmp-tags">{"".join(f"<span>{tag}</span>" for tag in tags)}</div>'
-        f'<div class="cmp-name" title="{html.escape(name)}">{html.escape(name)}</div>{body}</div>'
+        f'<div class="cmp-card"><div class="cmp-tags">{badges}</div>'
+        f'<div class="cmp-name" title="{html.escape(name)}">{html.escape(name)}</div>'
+        f'<div class="cmp-source">{credit}</div>{body}</div>'
     )
 
 
@@ -3755,12 +3832,17 @@ if st.session_state["mode"] == "window":
         with st.spinner("Reading every year on record..."):
             outlook = outlook_at(where)
         days = outlook["days"]
+        recorded = len(days) and outlook["knots"] is not None
         st.html(
             '<div class="answer-head"><div class="answer-eyebrow">What to expect</div>'
             '<div class="trip-title reveal">'
-            + reveal(f"{html.escape(names[where])} · {dates_label(dates)}") + "</div></div>"
+            + reveal(f"{html.escape(names[where])} · {dates_label(dates)}") + "</div>"
+            # Straight down to the comparison, which waits at the end.
+            + ('<a class="jump" href="#compare">Compare with your other spots <span>↓</span></a>'
+               if recorded else "")
+            + "</div>"
         )
-        if not len(days) or outlook["knots"] is None:
+        if not recorded:
             st.info(f"{names[where]} has no record on {dates_label(dates)} yet. Pick other "
                     "dates, or another spot.")
             st.stop()
@@ -3836,30 +3918,43 @@ if st.session_state["mode"] == "window":
                 f"wear: <b>{kit_for(outlook['air'])}</b>.</div></div>"
             )
 
-        # Should it disappoint: the same dates at up to three other spots.
-        others = [key for key in spots if key != where]
-        if others:
+        # Should it disappoint: the same dates at your other spots, in a panel
+        # of its own that the button under the title leads down to.
+        with st.container(key="compare_panel"):
             st.html(
-                '<div class="trip-block" style="animation-delay:2.5s">'
-                f'<div class="chapter-lead">Not sure about {html.escape(names[where])}?</div>'
-                '<div class="chapter-sub">Put it next to up to three of your other spots: the '
-                "same dates, wind and hours at each.</div></div>"
+                '<div class="answer-eyebrow" id="compare">Compare</div>'
+                f'<div class="cmp-title"><em>{html.escape(names[where])}</em>, or somewhere '
+                'else?</div><div class="chapter-sub">The same dates, wind and hours at your '
+                "other spots, each in its own local time. Pick as many as you like.</div>"
             )
+            ask_kind(st)
+            others = [key for key in comparable(spots) if key != where]
             # Set through its own key rather than a default, which the picker
             # ignores once drawn: a swap has to hand it the list it leaves.
-            # Only when it must change, as setting it resets what is typed.
             showing = st.session_state.get("trip_compare")
             wanted = [key for key in (kept("trip_compare", []) if showing is None else showing)
                       if key in others]
             if showing != wanted:
                 st.session_state["trip_compare"] = wanted
-            with st.container(key="trip_compare_pick"):
-                chosen = st.multiselect(
-                    "Compare with", others, max_selections=COMPARE_UP_TO,
-                    format_func=names.get, key="trip_compare",
-                    label_visibility="collapsed", placeholder="Pick up to three spots",
+            same_kind = kept("like_with_like", DEFAULT_LIKE_WITH_LIKE)
+            chosen = []
+            if not others:
+                st.html(
+                    f'<div class="cmp-hint">No other {own_kind()[:-1] if same_kind else "spot"} '
+                    "downloaded yet. "
+                    + ("Switch to All spots, or " if same_kind else "") + "pick one on the map.</div>"
                 )
+            else:
+                chosen = st.pills(
+                    "Set beside it", others, selection_mode="multi", key="trip_compare",
+                    # The icon of the source each spot comes from, as on the map screen.
+                    format_func=lambda key: f"{SOURCES[spots[key].get('source', 'era5')].split()[0]} "
+                    f"{names[key]}",
+                ) or []
             st.session_state["kept_trip_compare"] = chosen
+            if others and not chosen:
+                st.html('<div class="cmp-hint">Pick a spot above to see them side by side, '
+                        "best first.</div>")
             if chosen:
                 with st.spinner("Reading your other spots..."):
                     outlooks = {key: outlook_at(key) for key in [where, *chosen]}
@@ -3867,29 +3962,41 @@ if st.session_state["mode"] == "window":
                     key: typical_days(found["days"], length)
                     for key, found in outlooks.items() if len(found["days"])
                 }
+                # Best first, your pick ahead of a tie; no record on these dates, last.
+                order = sorted(outlooks, key=lambda key: (-totals.get(key, -1), key != where))
                 top = max(totals.values())
-                leaders = [key for key, total in totals.items() if total == top]
-                if len(leaders) == len(outlooks):
-                    leaders = []
-                if leaders and where not in leaders:
-                    st.html(
-                        '<div class="cmp-verdict">'
-                        + joined([f"<b>{html.escape(names[key])}</b>" for key in leaders])
-                        + f" {'brings' if len(leaders) == 1 else 'bring'} the most: {top} of "
-                        f"{length} days, against {totals.get(where, 0)} at "
-                        f"{html.escape(names[where])}.</div>"
+                leaders = [key for key in order if totals.get(key) == top]
+                bold = {key: f"<b>{html.escape(names[key])}</b>" for key in order}
+                if len(leaders) == len(totals) > 1:
+                    verdict = f"Much the same at each: {top} of {length} days."
+                elif leaders == [where]:
+                    verdict = f"{bold[where]} is the best of these: {top} of {length} days."
+                elif where in leaders:
+                    verdict = f"{joined([bold[key] for key in leaders])} share the most: {top} of {length} days."
+                else:
+                    verdict = (
+                        f"{joined([bold[key] for key in leaders])} "
+                        f"{'brings' if len(leaders) == 1 else 'bring'} the most: {top} of "
+                        f"{length} days, against {totals.get(where, 0)} at {bold[where]}."
                     )
-                columns = st.columns(len(outlooks), gap="small")
-                for index, (column, (key, found)) in enumerate(zip(columns, outlooks.items())):
-                    tags = (["Your pick"] if key == where else []) + (
-                        ["Most days"] if key in leaders else [])
-                    column.html(compare_card(names[key], found, length, tags, index))
-                    if key != where:
-                        column.button(
-                            "Go here instead", key=f"trip_swap_{key}", type="tertiary",
-                            icon=":material/swap_horiz:", on_click=swap_trip,
-                            args=(spots[key], key, where, chosen),
-                        )
+                st.html(f'<div class="cmp-verdict">{verdict}</div>')
+                for row in range(0, len(order), 4):
+                    for column, key in zip(st.columns(4, gap="small"), order[row:row + 4]):
+                        lead = key in leaders and len(leaders) < len(totals)
+                        tags = (["Your pick"] if key == where else []) + (["Most days"] if lead else [])
+                        # Spots on the same count share a place: 1, 1, 3.
+                        rank = (1 + sum(total > totals[key] for total in totals.values())
+                                if key in totals else None)
+                        with column.container(key=f"cmp_{'top_' if lead else ''}{order.index(key)}",
+                                              height="stretch"):
+                            st.html(compare_card(names[key], source_credit(spots[key]),
+                                                 outlooks[key], length, rank, tags))
+                            if key != where:
+                                st.button(
+                                    "Go here instead", key=f"trip_swap_{key}",
+                                    icon=":material/swap_horiz:", width="stretch",
+                                    on_click=swap_trip, args=(spots[key], key, where, chosen),
+                                )
 
         st.divider()
         st.caption(f"Local time at each spot · data at {names[where]}: {source_credit(entry)}")
