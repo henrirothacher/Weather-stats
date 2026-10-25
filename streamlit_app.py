@@ -361,7 +361,7 @@ st.html(
         display: flex; align-items: center; gap: .6rem;
         font-size: 1.02rem; font-weight: 700; color: #e8eef5; margin: .1rem 0 .15rem;
     }
-    .step-label b {
+    .step-label b, .answered b, .asking b, .upcoming b {
         display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; flex: none;
         border: 1px solid #26333f; border-radius: 4px; background: #141c25;
         color: #ffb703; font-size: .78rem;
@@ -409,7 +409,7 @@ st.html(
     }
     .groove-note { font-size: .86rem; color: #8b98a5; margin-top: .55rem; }
 
-    /* The two ways in. Each is drawn as a small instrument that idles cool
+    /* The three ways in. Each is drawn as a small instrument that idles cool
        and warms under the pointer, cool to warm like the wind bands. The
        whole card is the button: its label sits along the bottom edge.
        Registered as colours so they fade rather than jump; "\\3c" is "<",
@@ -477,7 +477,7 @@ st.html(
     [class*="st-key-choice_"] button:disabled { cursor: not-allowed; }
     [class*="st-key-choice_"] button:disabled p { color: #5b6b7a !important; }
     [class*="st-key-choice_"]:has(button:disabled) .choice-face { opacity: .35; }
-    [class*="st-key-choice_"]:has(button:disabled) :is(.dial-needle > span, .grid i) {
+    [class*="st-key-choice_"]:has(button:disabled) :is(.dial-needle > span, .grid i, .days-frame > span) {
         animation-play-state: paused;
     }
 
@@ -525,7 +525,7 @@ st.html(
         animation: cellWash 4s ease-in-out infinite;
         animation-delay: calc(var(--c) * .12s + var(--r) * .08s - 4s);
     }
-    .grid small {
+    .grid small, .day small {
         font-size: .62rem; font-weight: 600; line-height: 1; color: #5b6b7a;
     }
     .grid small { margin-top: 3px; }
@@ -535,9 +535,48 @@ st.html(
         28%           { background: color-mix(in srgb, var(--tone) 55%, #17212b); }
     }
 
-    @media (prefers-reduced-motion: reduce) {
-        .dial-needle > span, .grid i { animation: none; }
+    /* Plan a trip: two weeks with a frame stepping along them. */
+    .days { position: relative; display: flex; gap: 4px; }
+    .day { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+    .day i { width: 16px; height: 28px; border-radius: 3px; background: #17212b; }
+    .day:nth-child(7n) i, .day:nth-child(7n+6) i { background: #1e2a36; }
+    .days-frame { position: absolute; left: 0; bottom: 0; width: 100%; height: 28px; }
+    .days-frame > span {
+        position: absolute; left: -3px; top: -3px; width: 102px; height: 34px;
+        box-sizing: border-box; border: 2px solid var(--glow); border-radius: 5px;
+        background: color-mix(in srgb, var(--tone) 24%, transparent);
+        animation: frameScan 7s infinite;
     }
+    @keyframes frameScan {
+        0%   { transform: translateX(0); animation-timing-function: steps(9, end); }
+        60%  { transform: translateX(180px); animation-timing-function: steps(9, end); }
+        100% { transform: translateX(0); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .dial-needle > span, .grid i, .days-frame > span { animation: none; }
+    }
+
+    /* Explore and the trip planner: one question at a time. */
+    .view-title { font-size: 1.9rem; font-weight: 800; letter-spacing: -.03em; line-height: 1.15; }
+    .view-sub { color: #a9b6c3; font-size: .98rem; margin: .3rem 0 .9rem; }
+    .answered, .upcoming {
+        display: flex; align-items: center; gap: .75rem; font-size: .95rem; padding: .2rem 0;
+    }
+    .answered b { border-color: rgba(251, 133, 0, .55); color: #fb8500; }
+    .answered span { color: #8b98a5; min-width: 5.5rem; }
+    .answered strong { color: #e8eef5; font-weight: 700; }
+    .upcoming { color: #5b6b7a; }
+    .upcoming b { color: #5b6b7a; }
+    .st-key-asking {
+        border: 1px solid rgba(251, 133, 0, .55); border-radius: 10px;
+        padding: 1.1rem 1.3rem 1.2rem; margin: .35rem 0; background: #0f161e;
+        animation: riseIn .4s ease both;
+    }
+    .asking {
+        display: flex; align-items: center; gap: .75rem;
+        font-size: 1.2rem; font-weight: 800; color: #e8eef5;
+    }
+    .asking b { background: #fb8500; border-color: #fb8500; color: #0b0f14; }
     </style>
     """
 )
@@ -588,7 +627,7 @@ PRESETS = {
 # Top of the wind slider in explore, in knots.
 WIND_TOP = 50
 LOOKBACK = {"10 years": 10, "20 years": 20, "All": None}
-# Where the settings start, before you change anything.
+# Where explore and the trip planner start, before you change anything.
 DEFAULT_HOURS = (10, 17)
 DEFAULT_LASTING = 2
 DEFAULT_YEARS = "20 years"
@@ -1074,6 +1113,11 @@ def kept(key, default):
     return st.session_state.get(f"kept_{key}", default)
 
 
+def percent(value):
+    """A share as people say it: a chance that is not quite zero is not 0%."""
+    return "<1%" if 0 < value < 0.5 else f"{value:.0f}%"
+
+
 def wind_words(wind):
     """6–25 kn, 15+ kn or up to 12 kn: a wind range as a sailor says it."""
     low, high = wind
@@ -1090,6 +1134,64 @@ def sessions_mask(index, windows):
     for window in windows:
         combined |= hour_mask(index, window)
     return combined
+
+
+# A window of dates is ((month, day), (month, day)) and holds in every year:
+# 1–15 June is ((6, 1), (6, 15)). None is the whole year.
+
+def in_dates(index, dates):
+    """True on the calendar days inside the window, whatever the year. One
+    that runs past New Year, 20 Dec to 10 Jan, wraps round."""
+    if dates is None:
+        return np.ones(len(index), dtype=bool)
+    stamp = np.asarray(index.month * 100 + index.day)
+    start, end = (month * 100 + day for month, day in dates)
+    if start <= end:
+        return (stamp >= start) & (stamp <= end)
+    return (stamp >= start) | (stamp <= end)
+
+
+def window_year(index, dates):
+    """The year each day's window opened in, so 20 Dec – 10 Jan is one window."""
+    years = np.asarray(index.year)
+    if dates is None or dates[0] <= dates[1]:
+        return years
+    return years - (np.asarray(index.month * 100 + index.day) < dates[0][0] * 100 + dates[0][1])
+
+
+def window_days(dates):
+    """Every calendar day of the window in order, as (month, day). 29 Feb is
+    left out: it comes round one year in four, too seldom to chart."""
+    common = pd.date_range("2001-01-01", "2001-12-31")
+    pairs = [(int(month), int(day)) for month, day in zip(common.month, common.day)]
+    start, end = pairs.index(dates[0]), pairs.index(dates[1])
+    return pairs[start:end + 1] if start <= end else pairs[start:] + pairs[:end + 1]
+
+
+def dates_label(dates):
+    """1–15 June, or 28 May – 10 June across a month end."""
+    (first_month, first_day), (last_month, last_day) = dates
+    first, last = calendar.month_name[first_month], calendar.month_name[last_month]
+    if dates[0] == dates[1]:
+        return f"{first_day} {first}"
+    if first_month == last_month and first_day < last_day:
+        return f"{first_day}–{last_day} {first}"
+    return f"{first_day} {first} – {last_day} {last}"
+
+
+def as_dates(picked):
+    """The range from the date picker as a window, or None for a year or more.
+    With only the first end picked so far, that one day is the window."""
+    if not picked:
+        return None
+    start, end = picked[0], picked[-1]
+    if (end - start).days >= 365:
+        return None
+    # Not every year has a 29 Feb; the 28th stands in for it.
+    return tuple(
+        (2, 28) if (day.month, day.day) == (2, 29) else (day.month, day.day)
+        for day in (start, end)
+    )
 
 
 def lookback_start(frame, years_back):
@@ -1466,11 +1568,12 @@ if st.session_state["spot"] is None:
         '<div class="landing-title">Find where the <span class="wind">wind</span> '
         "really blows</div>"
         f'<div class="landing-sub">{pitch}See how often it is sailable for what you '
-        "ride, in which months and at what time of day.</div>"
+        "ride, in which months, at what time of day — and what to expect on the dates "
+        "you are going, next to your other spots.</div>"
         '<div class="landing-steps">'
         "<span><b>1</b>Pick a spot</span>"
         "<span><b>2</b>Choose your sport</span>"
-        "<span><b>3</b>Rate it or explore it</span>"
+        "<span><b>3</b>Rate it, explore it or plan a trip</span>"
         "</div></div>"
         '<div class="landing-facts">'
         + "".join(f"<div><b>{value}</b><span>{label}</span></div>" for value, label in facts)
@@ -2000,10 +2103,13 @@ def lasting_days(flags, length):
     return streak.where(flags, 0).groupby(day).max().ge(length)
 
 
-def flag_hours(frame, first_year, wind):
-    """The record from `first_year` on, with each hour flagged when its wind
-    is in your range."""
-    frame = frame[frame.index.year >= first_year]
+def flag_hours(frame, first_year, wind, dates):
+    """The record from `first_year` on, cut to your dates (None for all of
+    them), with each hour flagged when its wind is in your range. A window
+    over New Year starts with the first one to open in `first_year`, so none
+    is counted with only its January half."""
+    opened = window_year(frame.index, dates)
+    frame = frame[(opened >= first_year) & in_dates(frame.index, dates)]
     return frame, (frame["speed"] * MS_TO_KNOTS).between(*wind)
 
 
@@ -2012,7 +2118,7 @@ def good_days(path, mtime, zone, years_back, wind, lasting, hours):
     """Per local day over a spot's own last `years_back` years: did your
     hours on the water hold your wind `lasting` hours in a row?"""
     frame = load_wind(path, mtime, zone)
-    frame, good = flag_hours(frame, lookback_start(frame, years_back), wind)
+    frame, good = flag_hours(frame, lookback_start(frame, years_back), wind, None)
     return lasting_days(good[hour_mask(frame.index, hours)], lasting)
 
 
@@ -2021,7 +2127,7 @@ if "mode" not in st.session_state:
 
 
 # --- Start screen ---------------------------------------------------------
-# Your spot beside its map, then the sport, then two ways in, and the
+# Your spot beside its map, then the sport, then three ways in, and the
 # screen builds up in that order when you arrive. The cards only say what
 # each view answers, and their drawings show nothing about this spot: the
 # answers wait until you open one.
@@ -2032,6 +2138,9 @@ CHOICES = [
     ("explore", "The whole picture", "Explore this spot",
      "Windy days month by month and the wind rose, with more to switch on in the settings.",
      "Explore"),
+    ("window", "Your dates", "Plan a trip",
+     "Off to a regatta or a week away? See what to expect on your dates, beside other spots.",
+     "Plan a trip"),
 ]
 # Knots across the sport's ruler: enough for the kite's top end.
 GROOVE_SCALE = 40
@@ -2061,10 +2170,13 @@ START_BUILD_CSS = """
     [class*="st-key-choice_"] { animation: riseIn .6s cubic-bezier(.2, .7, .3, 1) both; }
     .st-key-choice_rating { animation-delay: 1.25s; }
     .st-key-choice_explore { animation-delay: 1.37s; }
+    .st-key-choice_window { animation-delay: 1.49s; }
     /* Then each instrument puts itself together. */
     .dial i { animation: fadeIn .2s ease both; animation-delay: calc(1.6s + var(--n) * .045s); }
     .dial-needle, .dial::after, .dial-read { animation: fadeIn .4s ease 2.1s both; }
     .grid > span { animation: fadeIn .3s ease both; animation-delay: calc(1.7s + var(--c) * .04s); }
+    .day { animation: riseIn .3s ease both; animation-delay: calc(1.8s + var(--d) * .035s); }
+    .days-frame { animation: fadeIn .4s ease 2.4s both; }
 }
 </style>
 """
@@ -2089,7 +2201,15 @@ def grid_face():
     ) + "</div>"
 
 
-FACES = {"rating": dial_face, "explore": grid_face}
+def days_face():
+    """Plan a trip: two weeks, a frame stepping along them."""
+    return '<div class="days">' + "".join(
+        f'<span class="day" style="--d:{day}"><small>{letter}</small><i></i></span>'
+        for day, letter in enumerate("MTWTFSS" * 2)
+    ) + '<span class="days-frame"><span></span></span></div>'
+
+
+FACES = {"rating": dial_face, "explore": grid_face, "window": days_face}
 
 
 def groove_ruler(low, high, note):
@@ -2171,7 +2291,7 @@ if st.session_state["mode"] is None:
 
     step_label(3, "What do you want to know?")
     for column, (target, kicker, title, blurb, action) in zip(
-        st.columns(2, gap="medium"), CHOICES
+        st.columns(3, gap="medium"), CHOICES
     ):
         locked = target == "rating" and not can_score(chosen)
         lock_note = (
@@ -2189,19 +2309,390 @@ if st.session_state["mode"] is None:
                 st.session_state["mode"] = target
                 st.session_state.pop("last_mode", None)
                 st.session_state["rating_fresh"] = target == "rating"
+                # The trip planner starts from its first question every time.
+                st.session_state["trip_step"] = 0
                 st.rerun()
     st.stop()
 
 
-# --- Settings ------------------------------------------------------------
-# Inside a view the sidebar carries everything it counts, what you sail
-# first. Explore and the rating share it, so the two cannot quietly count
-# different hours.
+# --- Questions, one at a time --------------------------------------------
+# The trip planner opens with a few questions: answered ones shrink to a
+# line you can reopen, the one you are on gets the room, the ones to come
+# wait greyed out, and the answer only once all are in. Then the sidebar
+# carries every answer, to change while you look. Explore goes straight to
+# its overview with the same settings in the sidebar, and the answers share
+# their keys, so one given in either view is already there in the other
+# and in the rating.
+
+COUNT_WORDS = ["No", "One", "Two", "Three", "Four", "Five"]
+# Where the trip's dates start before you pick: these days of next month.
+TRIP_DAYS = (10, 16)
+# A trip is at most this many days: drawn year by year, a dot a day.
+YEAR_ROWS_UP_TO = 62
+
+
+def coming_dates(first_day, last_day):
+    """Those days of next month: where a date picker starts."""
+    today = date.today()
+    coming = date(today.year + (today.month == 12), today.month % 12 + 1, 1)
+    return coming.replace(day=first_day), coming.replace(day=last_day)
+
+
+def ask_wind(activity):
+    """The range you would go out in, kept per sport."""
+    remembered(
+        st.slider, "Wind", 0, WIND_TOP, format="%d kn", label_visibility="collapsed",
+        key=f"wind_{activity}", default=ACTIVITIES[activity]["groove"],
+    )
+
+
+def ask_hours():
+    remembered(
+        st.slider, "On the water", 0, 23, format="%d:00", label_visibility="collapsed",
+        key="hours", default=DEFAULT_HOURS,
+    )
+    remembered(
+        st.segmented_control, "In a row", [1, 2, 3],
+        format_func=lambda h: f"{h} h in a row", required=True,
+        label_visibility="collapsed", key="lasting", default=DEFAULT_LASTING, start="default",
+    )
+
+
+# The dates as a calendar you click: your first day, then your last, the
+# range following the pointer in between. A component of our own, as
+# Streamlit's date picker is a small field with a pop-up. It draws as many
+# months side by side as there is room for, and only builds them anew when
+# you turn the page: hovering and clicking just repaint the days.
+CALENDAR_CSS = """
+.cal { --orange: #fb8500; color: #e8eef5; font-variant-numeric: tabular-nums; }
+.cal-top { display: flex; align-items: center; gap: .8rem; margin-bottom: 1rem; }
+.cal-summary { flex: 1; min-width: 0; text-align: center; }
+.cal-summary b {
+    display: block; font-size: clamp(1.25rem, 2.6vw, 1.7rem); font-weight: 800;
+    letter-spacing: -.03em; line-height: 1.2;
+}
+.cal-summary span { display: block; margin-top: .15rem; font-size: .85rem; color: #8b98a5; }
+.cal-summary.far span { color: #ffb703; }
+.nav {
+    display: grid; place-items: center; width: 2.6rem; height: 2.6rem; flex: none;
+    border: 1px solid #26333f; border-radius: 50%; background: #0f161e; color: #e8eef5;
+    cursor: pointer; transition: border-color .2s ease, background .2s ease;
+}
+.nav:hover:not(:disabled) { border-color: var(--orange); background: #161f29; }
+.nav:disabled { opacity: .3; cursor: default; }
+.nav svg { width: 1.1rem; height: 1.1rem; }
+.months { display: grid; grid-template-columns: repeat(var(--count), minmax(0, 1fr)); gap: 1.6rem; }
+.month { min-width: 0; }
+.month-name { margin: 0 0 .6rem .2rem; font-size: 1.05rem; font-weight: 800; letter-spacing: -.01em; }
+.month-name small { margin-left: .3rem; font-size: .8rem; font-weight: 600; color: #5b6b7a; }
+.dow, .days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.dow span {
+    padding-bottom: .4rem; text-align: center; font-size: .66rem; font-weight: 700;
+    letter-spacing: .08em; text-transform: uppercase; color: #5b6b7a;
+}
+.day {
+    position: relative; height: 2.75rem; padding: 0; border: 0; background: none;
+    color: inherit; font: inherit; font-size: .92rem; cursor: pointer;
+}
+.day span {
+    position: relative; z-index: 1; display: grid; place-items: center;
+    width: 2.4rem; height: 2.4rem; margin: auto; border-radius: 50%;
+    transition: background .15s ease, color .15s ease, box-shadow .15s ease;
+}
+.day:hover span { box-shadow: inset 0 0 0 1.5px var(--orange); }
+.day.weekend { color: #c5d0da; }
+.day.today span::after {
+    content: ""; position: absolute; bottom: .3rem; left: 50%; width: 4px; height: 4px;
+    margin-left: -2px; border-radius: 50%; background: #8ecae6;
+}
+.day:disabled { color: #2b3a48; cursor: default; }
+.day:disabled span { box-shadow: none; }
+/* The range as one band across each week, ends rounded at the picked days. */
+.day.in::before {
+    content: ""; position: absolute; inset: .2rem 0; background: rgba(251, 133, 0, .17);
+}
+.day.in.rs::before, .day.lo::before { border-top-left-radius: 1.2rem; border-bottom-left-radius: 1.2rem; }
+.day.in.re::before, .day.hi::before { border-top-right-radius: 1.2rem; border-bottom-right-radius: 1.2rem; }
+.day.lo::before { left: .25rem; }
+.day.hi::before { right: .25rem; }
+.day.lo span, .day.hi span { background: var(--orange); color: #0b0f14; font-weight: 800; }
+.day.lo.today span::after, .day.hi.today span::after { background: #0b0f14; }
+.cal.picking .day.in::before { background: rgba(251, 133, 0, .1); }
+.cal.picking .day.hi:not(.lo) span { background: rgba(251, 133, 0, .55); }
+.day.far::before { background: rgba(139, 152, 165, .12) !important; }
+.day.far span { background: none !important; color: #5b6b7a !important; }
+.cal-hint { margin-top: .9rem; text-align: center; font-size: .82rem; color: #8b98a5; }
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } }
+@keyframes slideFrom { from { opacity: 0; transform: translateX(var(--from)); } }
+.months.enter .month { animation: rise .5s cubic-bezier(.2, .7, .3, 1) both; }
+.months.enter .month:nth-child(2) { animation-delay: .08s; }
+.months.enter .month:nth-child(3) { animation-delay: .16s; }
+.months.turn .month { animation: slideFrom .35s cubic-bezier(.2, .7, .3, 1) both; }
+@media (prefers-reduced-motion: reduce) { .month { animation: none !important; } }
+"""
+
+CALENDAR_JS = """
+const DAY = 86400000;
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July",
+                "August", "September", "October", "November", "December"];
+const SHORT = MONTHS.map((name) => name.slice(0, 3));
+const ARROW = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
+  stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg>`;
+const parse = (text) => { const [y, m, d] = text.split("-").map(Number); return Date.UTC(y, m - 1, d); };
+const iso = (t) => new Date(t).toISOString().slice(0, 10);
+const monthOf = (t) => { const d = new Date(t); return d.getUTCFullYear() * 12 + d.getUTCMonth(); };
+const said = (t) => { const d = new Date(t); return `${d.getUTCDate()} ${SHORT[d.getUTCMonth()]}`; };
+const span = (a, b) => Math.round(Math.abs(b - a) / DAY) + 1;
+
+export default function (component) {
+  const { data, setStateValue, parentElement } = component;
+  const root = parentElement.querySelector(".cal");
+  let s = root.__state;
+  if (!s) {
+    s = root.__state = { pending: null, hover: null, view: null, sent: null, built: null };
+    root.innerHTML = `<div class="cal-top">
+        <button class="nav prev" aria-label="Earlier months">${ARROW("M15 5l-7 7 7 7")}</button>
+        <div class="cal-summary" aria-live="polite"><b></b><span></span></div>
+        <button class="nav next" aria-label="Later months">${ARROW("M9 5l7 7-7 7")}</button>
+      </div><div class="months"></div>
+      <div class="cal-hint">Click your first day, then your last. One day? Click it twice.</div>`;
+    root.addEventListener("click", (event) => {
+      const nav = event.target.closest(".nav");
+      if (nav) {
+        const step = nav.classList.contains("next") ? 1 : -1;
+        s.view += step;
+        build(step > 0 ? "28px" : "-28px");
+        return;
+      }
+      const day = event.target.closest(".day");
+      if (!day || day.disabled) return;
+      const t = Number(day.dataset.t);
+      if (s.pending === null) {
+        s.pending = t;
+        s.hover = t;
+      } else if (span(s.pending, t) > s.data.longest) {
+        // Too long to be a trip: start again from here.
+        s.pending = t;
+        s.hover = t;
+      } else {
+        s.start = Math.min(s.pending, t);
+        s.end = Math.max(s.pending, t);
+        s.pending = null;
+        s.sent = `${iso(s.start)}|${iso(s.end)}`;
+        s.send("range", { start: iso(s.start), end: iso(s.end) });
+      }
+      paint();
+    });
+    root.addEventListener("mouseover", (event) => {
+      const day = event.target.closest(".day");
+      if (s.pending === null || !day || day.disabled) return;
+      s.hover = Number(day.dataset.t);
+      paint();
+    });
+    // As many months as fit; checked again when the window changes size.
+    const resize = () => {
+      if (!root.isConnected) return window.removeEventListener("resize", resize);
+      if (count() !== s.count) build(null);
+    };
+    window.addEventListener("resize", resize);
+  }
+  s.data = data;
+  s.send = setStateValue;
+  s.low = parse(data.min);
+  s.high = parse(data.max);
+  s.today = parse(data.today);
+  // Take what Python holds, unless a pick is half made.
+  const held = `${data.start}|${data.end}`;
+  if (held !== s.sent) {
+    s.sent = held;
+    if (s.pending === null) {
+      s.start = parse(data.start);
+      s.end = parse(data.end);
+      s.view = null;
+    }
+  }
+  if (s.view === null) s.view = monthOf(s.start);
+  build(s.built === null ? "enter" : null);
+
+  function count() {
+    const width = root.getBoundingClientRect().width || 900;
+    return width >= 860 ? 3 : width >= 540 ? 2 : 1;
+  }
+
+  function build(motion) {
+    s.count = count();
+    s.view = Math.max(monthOf(s.low), Math.min(s.view, monthOf(s.high) - s.count + 1));
+    const months = root.querySelector(".months");
+    months.style.setProperty("--count", s.count);
+    let markup = "";
+    for (let m = s.view; m < s.view + s.count; m++) {
+      const year = Math.floor(m / 12), month = m % 12;
+      const first = Date.UTC(year, month, 1);
+      const length = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+      const offset = (new Date(first).getUTCDay() + 6) % 7;
+      let cells = "<span></span>".repeat(offset);
+      for (let d = 1; d <= length; d++) {
+        const t = first + (d - 1) * DAY;
+        const weekday = (offset + d - 1) % 7;
+        const kinds = ["day"];
+        if (weekday >= 5) kinds.push("weekend");
+        if (weekday === 0 || d === 1) kinds.push("rs");
+        if (weekday === 6 || d === length) kinds.push("re");
+        if (t === s.today) kinds.push("today");
+        const off = t < s.low || t > s.high;
+        cells += `<button class="${kinds.join(" ")}" data-t="${t}" ${off ? "disabled" : ""}
+          aria-label="${d} ${MONTHS[month]} ${year}"><span>${d}</span></button>`;
+      }
+      markup += `<div class="month"><div class="month-name">${MONTHS[month]}<small>${year}</small></div>
+        <div class="dow">${["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((n) => `<span>${n}</span>`).join("")}</div>
+        <div class="days">${cells}</div></div>`;
+    }
+    months.innerHTML = markup;
+    months.classList.remove("enter", "turn");
+    if (motion) {
+      void months.offsetWidth;
+      if (motion === "enter") months.classList.add("enter");
+      else { months.classList.add("turn"); months.style.setProperty("--from", motion); }
+    }
+    s.built = s.view;
+    root.querySelector(".prev").disabled = s.view <= monthOf(s.low);
+    root.querySelector(".next").disabled = s.view + s.count - 1 >= monthOf(s.high);
+    paint();
+  }
+
+  function paint() {
+    const picking = s.pending !== null;
+    const lo = picking ? Math.min(s.pending, s.hover) : s.start;
+    const hi = picking ? Math.max(s.pending, s.hover) : s.end;
+    const days = span(lo, hi);
+    const far = picking && days > s.data.longest;
+    root.classList.toggle("picking", picking);
+    for (const day of root.querySelectorAll(".day")) {
+      const t = Number(day.dataset.t);
+      const inside = t >= lo && t <= hi;
+      day.classList.toggle("in", inside);
+      day.classList.toggle("lo", t === lo);
+      day.classList.toggle("hi", t === hi);
+      day.classList.toggle("far", far && inside);
+    }
+    const summary = root.querySelector(".cal-summary");
+    summary.classList.toggle("far", far);
+    summary.querySelector("b").textContent = lo === hi ? said(lo) : `${said(lo)} → ${said(hi)}`;
+    summary.querySelector("span").textContent = far
+      ? `Up to ${s.data.longest} days: pick a nearer last day`
+      : picking && lo === hi ? "Now click your last day"
+      : `${days} day${days === 1 ? "" : "s"}`;
+  }
+}
+"""
+
+calendar_picker = st.components.v2.component(
+    "date_range_calendar", html='<div class="cal"></div>', css=CALENDAR_CSS, js=CALENDAR_JS,
+)
+
+
+def ask_dates(key, default, longest=365):
+    """A range of days on the calendar, at most `longest` long, kept under
+    `key` as (first, last). The calendar's own state only lives while it is
+    drawn, so it starts from the kept range each time it comes back."""
+    held = kept(key, default)
+    first, last = held[0], held[-1]
+    today = date.today()
+    result = calendar_picker(
+        key=f"{key}_calendar",
+        data={
+            "start": first.isoformat(), "end": last.isoformat(), "longest": longest,
+            "min": date(today.year, 1, 1).isoformat(),
+            "max": date(today.year + 1, 12, 31).isoformat(), "today": today.isoformat(),
+        },
+        on_range_change=lambda: None,
+    )
+    picked = (result or {}).get("range")
+    if picked:
+        first, last = date.fromisoformat(picked["start"]), date.fromisoformat(picked["end"])
+    st.session_state[f"kept_{key}"] = (first, last)
+    return first, last
+
+
+def wind_answer(activity):
+    return wind_words(kept(f"wind_{activity}", ACTIVITIES[activity]["groove"]))
+
+
+def hours_answer():
+    start, end = kept("hours", DEFAULT_HOURS)
+    when = "all day" if (start, end) == (0, 23) else f"{start:02d}:00–{end:02d}:59"
+    return f"{when}, {kept('lasting', DEFAULT_LASTING)} h in a row"
+
+
+def wind_hint(activity):
+    low, high = ACTIVITIES[activity]["groove"]
+    return f"{activity} counts {low}–{high} kt as worth going out." if can_score(activity) else ""
+
+
+HOURS_HINT = "A day counts when your wind holds this long without a break, inside these hours."
+
+
+def ask_in_turn(name, title, then, questions, ask, answer, hint):
+    """Draw `questions` one at a time and stop the run until all are in.
+    `ask(question)` draws its widgets and returns False while the answer
+    will not do; `answer(question)` says a kept one in a few words."""
+    asked = len(questions)
+    step = st.session_state.setdefault(f"{name}_step", 0)
+    if step >= asked:
+        return
+
+    with st.container(key=f"{name}_page"):
+        st.html(
+            f'<div class="view-title reveal">{reveal(title)}</div>'
+            f'<div class="view-sub">{COUNT_WORDS[asked]} questions, then {then}.</div>'
+        )
+        for question, (label, prompt) in enumerate(questions):
+            if question < step:
+                with st.container(horizontal=True, vertical_alignment="center",
+                                  key=f"{name}_asked_{question}"):
+                    st.html(
+                        f'<div class="answered"><b>✓</b><span>{label}</span>'
+                        f"<strong>{html.escape(answer(question))}</strong></div>"
+                    )
+                    if st.button("Change", key=f"{name}_change_{question}", type="tertiary"):
+                        st.session_state[f"{name}_step"] = question
+                        st.rerun()
+            elif question == step:
+                with st.container(key="asking"):
+                    st.html(f'<div class="asking"><b>{question + 1}</b>{prompt}</div>')
+                    usable = ask(question) is not False
+                    if hint(question):
+                        st.caption(hint(question))
+                    if st.button("Show me" if question == asked - 1 else "Next",
+                                 type="primary", icon=":material/arrow_forward:",
+                                 key=f"{name}_next", disabled=not usable):
+                        st.session_state[f"{name}_step"] = question + 1
+                        st.rerun()
+            else:
+                st.html(f'<div class="upcoming"><b>{question + 1}</b>{prompt}</div>')
+    st.stop()
+
+
+def side_dates(key, default, longest):
+    """The range ask_dates keeps under `key`, as a date field for the
+    sidebar, where the calendar has no room. A range half picked, or longer
+    than `longest` days, leaves the kept one as it was."""
+    today = date.today()
+    picked = st.sidebar.date_input(
+        "Dates", value=kept(key, default), format="DD.MM.YYYY", key=f"{key}_field",
+        min_value=date(today.year, 1, 1), max_value=date(today.year + 1, 12, 31),
+        help="Only the day and month count: every year on record is checked on these dates.",
+    )
+    if len(picked) == 2 and (picked[1] - picked[0]).days < longest:
+        st.session_state[f"kept_{key}"] = tuple(picked)
+    elif len(picked) == 2:
+        st.sidebar.warning(f"Up to {longest} days: pick a nearer last day.")
 
 
 def settings(mode):
     """The sidebar inside a view: what you sail, then everything else the
-    view counts. Returns what you sail."""
+    view counts. Its widgets share their keys with the questions, so an
+    answer and its setting are one value. Returns what you sail."""
     side = st.sidebar
     side.header("Settings")
     activity = side.selectbox(
@@ -2223,27 +2714,82 @@ def settings(mode):
         return activity
     remembered(side.segmented_control, "In a row", [1, 2, 3], format_func=lambda h: f"{h} h",
                required=True, key="lasting", default=DEFAULT_LASTING, start="default")
+    if mode == "window":
+        side_dates("trip_dates", coming_dates(*TRIP_DAYS), YEAR_ROWS_UP_TO)
     remembered(side.segmented_control, "Years", list(LOOKBACK), required=True,
                key="years", default=DEFAULT_YEARS, start="default")
     return activity
 
 
-# --- Explore: the spot at a glance -----------------------------------------
-# What the wind does here all year on one screen: four figures, the windy
-# days month by month, and the wind rose of the month you click beside the
-# map. Everything else waits in the sidebar under "Show more", a switch a
-# view, so the page starts simple and grows only as far as you ask.
+# --- Shared by explore and the trip planner ------------------------------
 
 POINT_WORDS = {"N": "north", "E": "east", "S": "south", "W": "west"}
 
-# The styles of explore's overview, sent with it.
+# The styles of explore and the trip planner, sent with either view.
 ANSWER_CSS = """
 <style>
+.st-key-trip_page { max-width: 760px; }
+/* Room for the calendar: three months side by side when it is open. */
+.st-key-trip_page:has([class*="_calendar"]) { max-width: 1180px; }
+.st-key-trip_result { max-width: 1000px; }
+.answer-eyebrow {
+    font-size: .7rem; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
+    color: #fb8500;
+}
+
+/* The one number, counting up to itself. "\\3c" is "<": see --tone. */
+@property --num { syntax: "\\3c integer>"; inherits: false; initial-value: 0; }
+@keyframes countUp { from { --num: 0; } to { --num: var(--to); } }
+.answer-head { margin: 1.1rem 0 1.3rem; animation: riseIn .5s ease both; }
+.answer-big { display: flex; align-items: baseline; gap: .2rem .8rem; flex-wrap: wrap; margin-top: .4rem; }
+.answer-num {
+    font-size: clamp(3.4rem, 8vw, 5.6rem); font-weight: 800; line-height: .95;
+    letter-spacing: -.05em; color: #fb8500; font-variant-numeric: tabular-nums;
+}
+.answer-num.count { counter-reset: num var(--num); animation: countUp 1.6s cubic-bezier(.16, .8, .3, 1) .15s both; }
+.answer-num.count::after { content: counter(num); }
+.answer-unit { font-size: clamp(1.3rem, 2.6vw, 1.9rem); font-weight: 700; letter-spacing: -.02em; color: #e8eef5; }
+.answer-sub { max-width: 64ch; margin-top: .6rem; font-size: .98rem; line-height: 1.5; color: #a9b6c3; }
+.answer-sub b { color: #e8eef5; }
+
+.chapter-lead {
+    margin-top: 1.2rem; font-size: clamp(1.45rem, 2.8vw, 2rem); font-weight: 800;
+    line-height: 1.15; letter-spacing: -.03em; color: #e8eef5; animation: riseIn .45s ease both;
+}
+.chapter-sub {
+    max-width: 66ch; margin: .45rem 0 1.3rem; font-size: .95rem; line-height: 1.55;
+    color: #a9b6c3; animation: riseIn .45s ease .08s both;
+}
+.chapter-sub b { color: #e8eef5; }
+/* Orange and blue stepped to sit in the dark-mode lightness band and stay
+   apart under colour blindness (checked in OKLab on the background). */
 .legend { display: flex; flex-wrap: wrap; gap: .4rem 1.2rem; margin-top: 1rem; font-size: .8rem; color: #8b98a5; }
 .legend span::before {
     content: ""; display: inline-block; width: .6rem; height: .6rem; margin-right: .45rem;
     border-radius: 50%; background: var(--c);
 }
+@keyframes dotOn { from { background: #17212b; transform: scale(.3); } }
+
+/* Days as dots: a row a month, or a row a year. They light up in order. */
+/* Dots stay day-sized however few there are, and shrink only to fit. */
+.dots { display: grid; gap: 5px; max-width: 760px; }
+.dot-row {
+    display: grid; grid-template-columns: 2.6rem minmax(0, max-content) 2rem;
+    justify-content: start; align-items: center; gap: .7rem;
+    animation: riseIn .4s ease both; animation-delay: calc(var(--r) * 30ms);
+}
+.dot-label { font-size: .78rem; font-weight: 600; color: #8b98a5; font-variant-numeric: tabular-nums; }
+.dot-row.marked .dot-label, .dot-row.marked .dot-count { color: #fb8500; }
+.dot-cells { display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 16px)); gap: 3px; }
+.dot-cells i { aspect-ratio: 1; border-radius: 50%; background: #17212b; }
+/* --lag holds the dots back until the block they sit in has arrived. */
+.dot-cells i.g {
+    animation: dotOn .4s ease both; animation-delay: calc(var(--k) + var(--lag, .45s));
+}
+.dot-cells i.g { background: #e37100; }
+.dot-count { font-size: .8rem; font-weight: 700; text-align: right; color: #e8eef5; font-variant-numeric: tabular-nums; }
+
+.rose-drawing { display: block; width: 100%; max-width: 330px; margin: 0 auto; }
 
 /* Your spots side by side. */
 .spots { display: grid; gap: .55rem; max-width: 820px; }
@@ -2267,8 +2813,63 @@ ANSWER_CSS = """
     .spot-bar { grid-column: 1 / -1; }
 }
 
+/* The trip planner: blocks arrive one after another, then the others. */
+.trip-title {
+    margin-top: .45rem; font-size: clamp(2.1rem, 4.6vw, 3.3rem); font-weight: 800;
+    line-height: 1.05; letter-spacing: -.04em;
+}
+.trip-block { margin-top: 1.5rem; animation: riseIn .55s ease both; }
+.trip-rose .rose-drawing { max-width: 250px; }
+.band {
+    display: flex; gap: 2px; max-width: 620px; height: 14px; margin-top: 1rem;
+    border-radius: 7px; overflow: hidden; background: #141c25;
+}
+.band i {
+    display: block; height: 100%; transform-origin: left;
+    animation: bandGrow .55s cubic-bezier(.2, .7, .3, 1) both;
+    animation-delay: calc(var(--lag, 0s) + var(--d) * .3s);
+}
+.legend b { color: #e8eef5; }
+.st-key-trip_compare_pick { max-width: 620px; animation: riseIn .5s ease 2.6s both; }
+.cmp-verdict { margin: .4rem 0 .2rem; font-size: .98rem; color: #a9b6c3; animation: riseIn .4s ease both; }
+.cmp-verdict b { color: #fb8500; }
+.cmp-card {
+    box-sizing: border-box; height: 100%; padding: 1rem 1.1rem 1.1rem;
+    border: 1px solid #26333f; border-radius: 8px; background: #0d1319;
+    animation: riseIn .5s cubic-bezier(.2, .7, .3, 1) both; animation-delay: calc(var(--r) * 90ms);
+}
+.cmp-card.top {
+    border-color: rgba(251, 133, 0, .6);
+    background: linear-gradient(180deg, rgba(251, 133, 0, .08), transparent 60%), #0d1319;
+}
+.cmp-tags { display: flex; gap: .6rem; min-height: 1rem; }
+.cmp-tags span {
+    font-size: .62rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+    color: #8b98a5;
+}
+.cmp-card.top .cmp-tags span:last-child { color: #fb8500; }
+.cmp-name {
+    margin-top: .3rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+    font-size: 1.05rem; font-weight: 700; color: #e8eef5;
+}
+.cmp-big { margin-top: .45rem; font-size: .9rem; color: #a9b6c3; }
+.cmp-big b {
+    margin-right: .15rem; font-size: 2.2rem; font-weight: 800; letter-spacing: -.04em;
+    color: #e8eef5; font-variant-numeric: tabular-nums;
+}
+.cmp-card.top .cmp-big b { color: #fb8500; }
+.cmp-bar { height: 6px; margin: .5rem 0 .85rem; border-radius: 3px; background: #141c25; overflow: hidden; }
+.cmp-bar i {
+    display: block; width: var(--v); height: 100%; border-radius: 3px; background: #e37100;
+    transform-origin: left; animation: bandGrow .7s cubic-bezier(.2, .7, .3, 1) both;
+    animation-delay: calc(var(--r) * 90ms + .25s);
+}
+.cmp-facts { display: grid; gap: .3rem; font-size: .84rem; color: #a9b6c3; }
+.cmp-facts b { color: #e8eef5; }
+
 @media (prefers-reduced-motion: reduce) {
-    .spot-bar i { animation: none !important; }
+    .dot-cells i, .spot-bar i, .band i, .cmp-bar i { animation: none !important; }
+    .answer-num.count { animation: none; counter-reset: num var(--to); }
 }
 </style>
 """
@@ -2280,9 +2881,58 @@ def compass_words(point):
     return f"{words[0]}-{''.join(words[1:])}" if len(words) == 3 else "".join(words)
 
 
+def joined(words):
+    """May; May and July; May, June and July."""
+    return words[0] if len(words) == 1 else f"{', '.join(words[:-1])} and {words[-1]}"
+
+
+def years_named(years, total):
+    """2019 and 2021, or past three of them, how many of the `total`."""
+    if len(years) > 3:
+        return f"{len(years)} of the {total} years"
+    return joined([str(year) for year in sorted(years)])
+
+
 def ordinal(number):
     suffix = "th" if 11 <= number % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(number % 10, "th")
     return f"{number}{suffix}"
+
+
+def year_rows(days, dates):
+    """Your dates in every year that has all of them, newest first: per day,
+    'g' when it brought your wind, '' when not."""
+    cells = days[~((days.index.month == 2) & (days.index.day == 29))]
+    length = len(window_days(dates))
+    rows = []
+    for year, group in cells.groupby(window_year(cells.index, dates)):
+        if len(group) >= length:
+            rows.append((int(year), list(np.where(group["good"], "g", ""))))
+    return rows[::-1]
+
+
+def dot_rows(rows):
+    """Days as dots that light up in reading order. Each row: its label, the
+    kind of each day ('g' or ''), its count, a hover note, and whether
+    to mark it out."""
+    lit = sum(bool(kind) for _, kinds, *_ in rows for kind in kinds)
+    pace = min(4.0, 1400 / max(lit, 1))   # ms between dots, so it never drags
+    widest = max(len(kinds) for _, kinds, *_ in rows)
+    order, drawn = 0, []
+    for index, (label, kinds, count, note, marked) in enumerate(rows):
+        cells = []
+        for kind in kinds:
+            if kind:
+                cells.append(f'<i class="{kind}" style="--k:{order * pace:.0f}ms"></i>')
+                order += 1
+            else:
+                cells.append("<i></i>")
+        drawn.append(
+            f'<div class="dot-row{" marked" if marked else ""}" style="--r:{index}" '
+            f'title="{html.escape(note)}"><span class="dot-label">{label}</span>'
+            f'<span class="dot-cells">{"".join(cells)}</span>'
+            f'<span class="dot-count">{count}</span></div>'
+        )
+    return f'<div class="dots" style="--cols:{widest}">{"".join(drawn)}</div>'
 
 
 def water_hours(hours):
@@ -2297,6 +2947,53 @@ def best_hours(pct, hours, length=3):
     runs = [span[i:i + length] for i in range(len(span) - length + 1)]
     return max(runs, key=lambda run: pct.reindex(run).fillna(0).mean())
 
+
+def rose_drawing(degrees):
+    """Where the wind comes from as sixteen petals, each as long as its share
+    of the hours, growing out from the middle."""
+    sectors = np.floor(((np.asarray(degrees) + 11.25) % 360) / 22.5).astype(int)
+    share = np.bincount(sectors, minlength=16) / len(sectors)
+    top = share.max()
+
+    def at(radius, angle):
+        return f"{100 + radius * np.sin(angle):.1f} {100 - radius * np.cos(angle):.1f}"
+
+    petals = []
+    for sector, part in enumerate(share):
+        if part == 0:
+            continue
+        outer = 20 + 72 * part / top
+        first, last = np.radians(sector * 22.5 - 9.5), np.radians(sector * 22.5 + 9.5)
+        colour = "#ffb703" if part == top else blend("#4d2c0c", "#e37100", part / top)
+        petals.append(
+            f'<path d="M{at(16, first)} L{at(outer, first)} A{outer:.1f} {outer:.1f} 0 0 1 '
+            f'{at(outer, last)} L{at(16, last)} A16 16 0 0 0 {at(16, first)} Z" '
+            f'fill="{colour}" style="animation-delay:{.15 + sector * .04:.2f}s"/>'
+        )
+    rings = "".join(
+        f'<circle cx="100" cy="100" r="{radius}" fill="none" stroke="#26333f"/>'
+        for radius in (16, 56, 92)
+    )
+    letters = "".join(
+        f'<text x="{x}" y="{y}" fill="#8b98a5" font-size="11" font-weight="700" '
+        f'font-family="system-ui, sans-serif" text-anchor="middle" '
+        f'dominant-baseline="central">{letter}</text>'
+        for letter, x, y in (("N", 100, -4), ("E", 204, 100), ("S", 100, 204), ("W", -4, 100))
+    )
+    motion = (
+        "<style>path{transform-origin:100px 100px;"
+        "animation:grow .8s cubic-bezier(.2,.7,.3,1) both}"
+        "@keyframes grow{from{transform:scale(.15);opacity:0}}"
+        "@media (prefers-reduced-motion:reduce){path{animation:none}}</style>"
+    )
+    return svg_image(motion + rings + "".join(petals) + letters, "-16 -16 232 232", "rose-drawing")
+
+
+# --- Explore: the spot at a glance -----------------------------------------
+# What the wind does here all year on one screen: four figures, the windy
+# days month by month, and the wind rose of the month you click beside the
+# map. Everything else waits in the sidebar under "Show more", a switch a
+# view, so the page starts simple and grows only as far as you ask.
 
 EXTRAS = {
     "day": "Through the day",
@@ -2594,6 +3291,318 @@ if st.session_state["mode"] == "explore":
             else f"days-{LATITUDE:+.2f}_{LONGITUDE:+.2f}.csv",
             mime="text/csv", type="tertiary", icon=":material/download:",
         )
+    st.stop()
+
+
+# --- Plan a trip: three questions, then what to expect ---------------------
+# Your spot on set dates, a regatta or a week away: when, the wind you need
+# and your hours on the water, one at a time. Where is the spot you picked.
+# Then what those dates have brought in the years on record, built up a
+# piece at a time, and the same dates at up to three of your other spots,
+# should this one disappoint.
+
+TRIP_QUESTIONS = [
+    ("When", "When are you there?"),
+    ("Wind", "How much wind do you need?"),
+    ("On the water", "When are you on the water?"),
+]
+COMPARE_UP_TO = 3
+# Your hours on the water as too light, right and too strong.
+BANDS = {
+    "light": ("Too light", "#3a4a5a"),
+    "good": ("In your range", "#e37100"),
+    "strong": ("Too strong", "#9d0208"),
+}
+
+
+@st.cache_data(show_spinner=False, max_entries=128)
+def trip_outlook(path, mtime, zone, years_back, wind, lasting, hours, dates):
+    """What a spot's record says about your dates: per day whether your wind
+    held `lasting` hours in a row on the water, and over your hours on the
+    water how often it was too light, right or too strong, how hard it blew,
+    where it came from when it was right, and how warm the air was."""
+    frame = load_wind(path, mtime, zone)
+    frame, good = flag_hours(frame, lookback_start(frame, years_back), wind, dates)
+    on_water = hour_mask(frame.index, hours)
+    knots = frame.loc[on_water, "speed"] * MS_TO_KNOTS
+    flags = lasting_days(good[on_water], lasting)
+    right = frame[good & on_water]
+    air = frame.loc[on_water, "temp_c"].dropna() if "temp_c" in frame else pd.Series(dtype=float)
+    return {
+        "days": flags.to_frame("good"),
+        "light": float((knots < wind[0]).mean() * 100) if len(knots) else 0.0,
+        "strong": float((knots > wind[1]).mean() * 100) if len(knots) else 0.0,
+        # The middle half of your hours on the water, and its midpoint.
+        "knots": np.percentile(knots, [25, 50, 75]).tolist() if len(knots) else None,
+        "direction": wind_direction(right["u10"], right["v10"]).to_numpy(),
+        "hour": good.groupby(frame.index.hour).mean().reindex(range(24)) * 100,
+        "air": float(air.mean()) if len(air) else None,
+    }
+
+
+def typical_days(days, length):
+    """Days with your wind in a typical year: whole from five days up, to a
+    tenth below, where a whole number would round a trip away."""
+    expected = float(days["good"].mean()) * length if len(days) else 0.0
+    return round(expected) if length >= 5 else round(expected, 1)
+
+
+def wind_bands(outlook):
+    """Too light, right and too strong as whole percents that add up to 100."""
+    light, strong = round(outlook["light"]), round(outlook["strong"])
+    return {"light": light, "good": 100 - light - strong, "strong": strong}
+
+
+def band_bar(bands):
+    """Your hours on the water as one bar, too light to too strong."""
+    parts = "".join(
+        f'<i style="width:{share}%;background:{BANDS[kind][1]};--d:{order}"></i>'
+        for order, (kind, share) in enumerate(bands.items()) if share > 0
+    )
+    legend = "".join(
+        f'<span style="--c:{BANDS[kind][1]}">{BANDS[kind][0]} <b>{share}%</b></span>'
+        for kind, share in bands.items()
+    )
+    return f'<div class="band">{parts}</div><div class="legend">{legend}</div>'
+
+
+def swap_trip(entry, key, where, chosen):
+    """Go to a compared spot instead, the whole app with you: the one you
+    leave joins the others. A callback, as only one can reach the picker
+    before it is drawn."""
+    enter_spot({k: v for k, v in entry.items() if k != "path"})
+    st.session_state["trip_compare"] = [where, *[other for other in chosen if other != key]]
+
+
+def compare_card(name, outlook, length, tags, index):
+    """One spot on your dates, to set beside the others."""
+    days = outlook["days"]
+    if not len(days) or outlook["knots"] is None:
+        body = '<div class="cmp-facts"><span>No record on these dates.</span></div>'
+    else:
+        count = typical_days(days, length)
+        bands = wind_bands(outlook)
+        low, _, high = outlook["knots"]
+        facts = [
+            f"Usually <b>{low:.0f}–{high:.0f} kt</b>",
+            f"<b>{bands['good']}%</b> in range · {bands['light']}% too light",
+            f"From the <b>{prevailing_direction(outlook['direction'])}</b> when right"
+            if len(outlook["direction"]) else "Never in your range",
+            f"<b>{outlook['air']:.0f} °C</b> air" if outlook["air"] is not None
+            else "No air temperature",
+        ]
+        body = (
+            f'<div class="cmp-big"><b>{count}</b> of {length} days</div>'
+            f'<div class="cmp-bar"><i style="--v:{count / length * 100:.0f}%"></i></div>'
+            f'<div class="cmp-facts">{"".join(f"<span>{fact}</span>" for fact in facts)}</div>'
+        )
+    return (
+        f'<div class="cmp-card{" top" if "Most days" in tags else ""}" style="--r:{index}">'
+        f'<div class="cmp-tags">{"".join(f"<span>{tag}</span>" for tag in tags)}</div>'
+        f'<div class="cmp-name" title="{html.escape(name)}">{html.escape(name)}</div>{body}</div>'
+    )
+
+
+if st.session_state["mode"] == "window":
+    st.html(ANSWER_CSS)
+    activity = st.session_state["activity"]
+    spots = downloaded_locations()
+    # The spot you picked, by its key among the others on disk.
+    where = next((key for key, entry in spots.items() if entry["path"] == dataset_path), None)
+    if where is None:
+        where, spots = "here", {"here": {**spot, "path": dataset_path}, **spots}
+    entry = spots[where]
+    names = spot_names(spots)
+    default_dates = coming_dates(*TRIP_DAYS)
+
+    def trip_ask(question):
+        if question == 0:
+            dates = as_dates(ask_dates("trip_dates", default_dates, YEAR_ROWS_UP_TO))
+            # A dot a day and a row a year: two months is as wide as it goes.
+            if dates is None or len(window_days(dates)) > YEAR_ROWS_UP_TO:
+                st.warning("Pick up to two months: a regatta, a trip or a season.")
+                return False
+        elif question == 1:
+            ask_wind(activity)
+        else:
+            ask_hours()
+
+    def trip_answer(question):
+        if question == 0:
+            dates = as_dates(kept("trip_dates", default_dates))
+            return dates_label(dates) if dates else "–"
+        return wind_answer(activity) if question == 1 else hours_answer()
+
+    hints = [
+        "Only the day and month count: every year on record is checked on these dates.",
+        wind_hint(activity),
+        HOURS_HINT,
+    ]
+    ask_in_turn("trip", f"Plan a trip to {html.escape(names[where])}",
+                "what to expect on your dates", TRIP_QUESTIONS,
+                trip_ask, trip_answer, lambda question: hints[question])
+
+    # --- The answer, built up: your days, the wind, the air, then others ---
+    activity = settings("window")
+    picked = kept("trip_dates", default_dates)
+    dates = as_dates(picked)
+    length = len(window_days(dates))
+    wind = tuple(kept(f"wind_{activity}", ACTIVITIES[activity]["groove"]))
+    hours = tuple(kept("hours", DEFAULT_HOURS))
+    lasting = kept("lasting", DEFAULT_LASTING)
+    years_back = LOOKBACK[kept("years", DEFAULT_YEARS)]
+    within = (
+        "at any hour" if hours == (0, 23)
+        else f"between {hours[0]:02d}:00 and {hours[1]:02d}:59"
+    )
+
+    with st.container(key="trip_result"):
+        def outlook_at(key):
+            path = spots[key]["path"]
+            return trip_outlook(path, path.stat().st_mtime, spots[key]["zone"], years_back,
+                                wind, lasting, hours, dates)
+
+        with st.spinner("Reading every year on record..."):
+            outlook = outlook_at(where)
+        days = outlook["days"]
+        st.html(
+            '<div class="answer-head"><div class="answer-eyebrow">What to expect</div>'
+            '<div class="trip-title reveal">'
+            + reveal(f"{html.escape(names[where])} · {dates_label(dates)}") + "</div></div>"
+        )
+        if not len(days) or outlook["knots"] is None:
+            st.info(f"{names[where]} has no record on {dates_label(dates)} yet. Pick other "
+                    "dates, or another spot.")
+            st.stop()
+
+        # Your days: how many bring your wind, and in every year on record.
+        typical = typical_days(days, length)
+        counted = (
+            f'<span class="answer-num count" style="--to:{typical}"></span>'
+            if isinstance(typical, int) else f'<span class="answer-num">{typical}</span>'
+        )
+        years_text = f"{days.index.min().year}–{days.index.max().year}"
+        rows = year_rows(days, dates)
+        record = ""
+        if rows:
+            tally = {year: sum(kind == "g" for kind in kinds) for year, kinds in rows}
+            most, least = max(tally.values()), min(tally.values())
+            tops = [year for year in tally if tally[year] == most]
+            lows = [year for year in tally if tally[year] == least]
+            record = (
+                '<div class="chapter-lead">'
+                + (f"{most} of {length} days, every year" if most == least else
+                   f"Between {least} and {most} of {length} days a year")
+                + '</div><div class="chapter-sub">One row per year, a dot per day, lit when '
+                "your wind came."
+                + ("" if most == least else
+                   f" <b>{most}</b> in {years_named(tops, len(tally))}; the leanest, "
+                   f"{years_named(lows, len(tally))}, had <b>{least}</b>.")
+                + "</div>"
+                + dot_rows([
+                    (year, kinds, tally[year], f"{year}: {tally[year]} of {length} days",
+                     most != least and year in tops and len(tops) <= 3)
+                    for year, kinds in rows
+                ])
+            )
+        st.html(
+            '<div class="trip-block" style="--lag:.8s">'
+            f'<div class="answer-big">{counted}<span class="answer-unit">of {length} days</span>'
+            f'</div><div class="answer-sub">with <b>{wind_words(wind)}</b> for {lasting} h in a '
+            f"row {within}, in a typical year: {html.escape(percent(days['good'].mean() * 100))}"
+            f" of days, counted over {years_text}.</div>{record}</div>"
+        )
+
+        # The wind: how hard, how often right, from where, best when.
+        bands = wind_bands(outlook)
+        low, middle, high = outlook["knots"]
+        best = best_hours(outlook["hour"], hours)
+        direction = outlook["direction"]
+        text_col, rose_col = st.columns([3, 2], gap="large", vertical_alignment="center")
+        text_col.html(
+            '<div class="trip-block" style="animation-delay:1.5s;--lag:1.8s">'
+            f'<div class="chapter-lead">Usually {low:.0f}–{high:.0f} kt, '
+            f"a {beaufort(middle)}</div>"
+            f'<div class="chapter-sub">Of your hours on the water, <b>{bands["good"]}%</b> '
+            f"have wind in your range, {bands['light']}% are too light and "
+            f"{bands['strong']}% too strong"
+            + (f". In range, it mostly comes from the <b>"
+               f"{compass_words(prevailing_direction(direction))}</b>" if len(direction) else "")
+            + f". Best between <b>{best[0]:02d}:00 and {best[-1]:02d}:59</b>.</div>"
+            + band_bar(bands) + "</div>"
+        )
+        if len(direction):
+            rose_col.html(
+                '<div class="trip-block trip-rose" style="animation-delay:1.7s">'
+                + rose_drawing(direction) + "</div>"
+            )
+
+        # The air, and what that means you wear.
+        if outlook["air"] is not None:
+            st.html(
+                '<div class="trip-block" style="animation-delay:2.1s">'
+                f'<div class="chapter-lead">Around {outlook["air"]:.0f} °C in your hours</div>'
+                '<div class="chapter-sub">Air, not water, on average over your dates. What to '
+                f"wear: <b>{kit_for(outlook['air'])}</b>.</div></div>"
+            )
+
+        # Should it disappoint: the same dates at up to three other spots.
+        others = [key for key in spots if key != where]
+        if others:
+            st.html(
+                '<div class="trip-block" style="animation-delay:2.5s">'
+                f'<div class="chapter-lead">Not sure about {html.escape(names[where])}?</div>'
+                '<div class="chapter-sub">Put it next to up to three of your other spots: the '
+                "same dates, wind and hours at each.</div></div>"
+            )
+            # Set through its own key rather than a default, which the picker
+            # ignores once drawn: a swap has to hand it the list it leaves.
+            # Only when it must change, as setting it resets what is typed.
+            showing = st.session_state.get("trip_compare")
+            wanted = [key for key in (kept("trip_compare", []) if showing is None else showing)
+                      if key in others]
+            if showing != wanted:
+                st.session_state["trip_compare"] = wanted
+            with st.container(key="trip_compare_pick"):
+                chosen = st.multiselect(
+                    "Compare with", others, max_selections=COMPARE_UP_TO,
+                    format_func=names.get, key="trip_compare",
+                    label_visibility="collapsed", placeholder="Pick up to three spots",
+                )
+            st.session_state["kept_trip_compare"] = chosen
+            if chosen:
+                with st.spinner("Reading your other spots..."):
+                    outlooks = {key: outlook_at(key) for key in [where, *chosen]}
+                totals = {
+                    key: typical_days(found["days"], length)
+                    for key, found in outlooks.items() if len(found["days"])
+                }
+                top = max(totals.values())
+                leaders = [key for key, total in totals.items() if total == top]
+                if len(leaders) == len(outlooks):
+                    leaders = []
+                if leaders and where not in leaders:
+                    st.html(
+                        '<div class="cmp-verdict">'
+                        + joined([f"<b>{html.escape(names[key])}</b>" for key in leaders])
+                        + f" {'brings' if len(leaders) == 1 else 'bring'} the most: {top} of "
+                        f"{length} days, against {totals.get(where, 0)} at "
+                        f"{html.escape(names[where])}.</div>"
+                    )
+                columns = st.columns(len(outlooks), gap="small")
+                for index, (column, (key, found)) in enumerate(zip(columns, outlooks.items())):
+                    tags = (["Your pick"] if key == where else []) + (
+                        ["Most days"] if key in leaders else [])
+                    column.html(compare_card(names[key], found, length, tags, index))
+                    if key != where:
+                        column.button(
+                            "Go here instead", key=f"trip_swap_{key}", type="tertiary",
+                            icon=":material/swap_horiz:", on_click=swap_trip,
+                            args=(spots[key], key, where, chosen),
+                        )
+
+        st.divider()
+        st.caption(f"Local time at each spot · data at {names[where]}: {source_credit(entry)}")
     st.stop()
 
 

@@ -2,7 +2,7 @@
 
 Pick any point on earth or any Swiss weather station, pull its wind
 history, and see whether it is worth sailing — by month, by time of day,
-and against your other spots.
+and when, and at which of your spots, the wind you want turns up most.
 
 Built with Streamlit on two sources, picked on the start screen:
 
