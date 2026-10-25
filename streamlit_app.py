@@ -885,10 +885,11 @@ def by_a_shore(stations):
     return pd.Series(near, index=stations.index)
 
 
-def save_station(spot, target, times, speed, bearing, celsius, credit):
+def save_station(spot, target, times, speed, bearing, celsius, credit, **details):
     """A station's hourly readings stored in the layout of an ERA5 download,
     so everything downstream reads both. `speed` is in m/s, `bearing` where
-    the wind comes from in degrees, `celsius` the air, if recorded."""
+    the wind comes from in degrees, `celsius` the air, if recorded. Any
+    `details` go into the file beside the station's own."""
     # Stations report speed and where the wind comes from; ERA5 gives the
     # eastward and northward parts. Convert so the two read the same.
     speed = speed.to_numpy(dtype="float32")
@@ -909,7 +910,7 @@ def save_station(spot, target, times, speed, bearing, celsius, credit):
         attrs={
             "source": credit, "station": spot["station"], "name": spot["name"],
             "lat": float(spot["lat"]), "lon": float(spot["lon"]),
-            "height": float(spot["height"]),
+            "height": float(spot["height"]), **details,
         },
     )
     partial = target.with_suffix(".part")
@@ -918,48 +919,72 @@ def save_station(spot, target, times, speed, bearing, celsius, credit):
     return target
 
 
-def fetch_station(spot, target, progress=None):
-    """Every hourly file MeteoSwiss holds for a station (one per decade, plus
-    this year up to yesterday) joined into one record.
-    `progress(done, total)` hears about each file as it lands."""
-    item = requests.get(f"{OGD_ITEMS}/{spot['station'].lower()}", timeout=60)
+def hourly_files(abbr):
+    """Every hourly file MeteoSwiss holds for a station: one per decade, plus
+    this year up to yesterday. Historical sorts before recent, so where the
+    two meet, recent wins."""
+    item = requests.get(f"{OGD_ITEMS}/{abbr.lower()}", timeout=60)
     item.raise_for_status()
-    # Historical sorts before recent, so where the two meet, recent wins.
-    urls = sorted(
+    return sorted(
         asset["href"] for name, asset in item.json()["assets"].items()
         if "_h_historical_" in name or name.endswith("_h_recent.csv")
     )
-    if not urls:
-        raise RuntimeError("MeteoSwiss lists no hourly data for this station")
-    wanted = {"reference_timestamp", "fkl010h0", "dkl010h0", "tre200h0"}
-    # MeteoSwiss serves each connection slowly, so fetch the files side by side.
-    with ThreadPoolExecutor(max_workers=len(urls)) as pool:
-        jobs = [
-            pool.submit(ogd_csv, url, usecols=lambda column: column in wanted)
-            for url in urls
-        ]
-        for done, _ in enumerate(as_completed(jobs), 1):
-            if progress:
-                progress(done, len(jobs))
-        # Joined in URL order, not arrival order, for the recent-wins rule.
-        frame = pd.concat([job.result() for job in jobs], ignore_index=True)
 
+
+def by_hour(frame):
+    """MeteoSwiss rows by the UTC hour they cover, one row an hour."""
     stamp = pd.to_datetime(frame["reference_timestamp"], format="%d.%m.%Y %H:%M")
     # Timestamps are UTC and mark the end of the hour (16:00 = 15:10–16:00),
     # so step each back to the hour it covers. Before 2018 the hour ran
     # 15:50–16:40 and already carries the right label.
     stamp = stamp - pd.to_timedelta((stamp >= "2018-01-01").astype(int), unit="h")
-    frame = (
-        frame.assign(time=stamp)
-        .dropna(subset=["fkl010h0", "dkl010h0"])
-        .drop_duplicates("time", keep="last")
-        .sort_values("time")
-    )
+    return frame.assign(time=stamp).drop_duplicates("time", keep="last").set_index("time").sort_index()
+
+
+def fetch_station(spot, target, progress=None):
+    """Every hourly reading MeteoSwiss holds for a station, joined into one
+    record. A station that measures no air temperature borrows it from the
+    nearest one that does, 0.65 °C warmer for every 100 m it stands lower.
+    `progress(done, total)` hears about each file as it lands."""
+    stations = meteoswiss_stations()
+    lender = None
+    if not stations["has_temp"].get(spot["station"], True):
+        others = stations[stations["has_temp"]]
+        lender = km_from(spot["lat"], spot["lon"], others["lat"], others["lon"]).idxmin()
+    files = [(abbr, url) for abbr in filter(None, (spot["station"], lender))
+             for url in hourly_files(abbr)]
+    if not any(abbr == spot["station"] for abbr, _ in files):
+        raise RuntimeError("MeteoSwiss lists no hourly data for this station")
+    wanted = {"reference_timestamp", "fkl010h0", "dkl010h0", "tre200h0"}
+    # MeteoSwiss serves each connection slowly, so fetch the files side by side.
+    with ThreadPoolExecutor(max_workers=len(files)) as pool:
+        jobs = [
+            pool.submit(ogd_csv, url, usecols=lambda column: column in wanted)
+            for _, url in files
+        ]
+        for done, _ in enumerate(as_completed(jobs), 1):
+            if progress:
+                progress(done, len(jobs))
+
+    def joined(station):
+        """A station's files in URL order, not arrival order, for the recent-wins rule."""
+        return pd.concat([job.result() for (abbr, _), job in zip(files, jobs) if abbr == station],
+                         ignore_index=True)
+
+    frame = by_hour(joined(spot["station"]).dropna(subset=["fkl010h0", "dkl010h0"]))
     if frame.empty:
         raise RuntimeError("This station has no wind readings yet")
+    details = {}
+    if lender:
+        air = by_hour(joined(lender).dropna(subset=["tre200h0"]))["tre200h0"]
+        rise = stations.loc[lender, "height"] - spot["height"]
+        frame["tre200h0"] = air.reindex(frame.index) + rise * 0.0065
+        details["air_from"] = (
+            f"{stations.loc[lender, 'name']} ({lender}, {stations.loc[lender, 'height']:.0f} m)"
+        )
     return save_station(
-        spot, target, frame["time"], frame["fkl010h0"], frame["dkl010h0"],
-        frame.get("tre200h0"), "MeteoSwiss SwissMetNet (CC BY 4.0)",
+        spot, target, frame.index, frame["fkl010h0"], frame["dkl010h0"],
+        frame.get("tre200h0"), "MeteoSwiss SwissMetNet (CC BY 4.0)", **details,
     )
 
 
@@ -1931,8 +1956,8 @@ if st.session_state["spot"] is None:
             facts_row[2].metric(
                 "Data", "on disk" if cached.exists() else f"since {row['since']:.0f}",
                 icon=":material/database:",
-                help=None if row["has_temp"] else "Wind only: this station does not "
-                "record air temperature.",
+                help=None if row["has_temp"] else "This station measures no air "
+                "temperature, so it borrows it from the nearest one that does.",
             )
             with facts_row[3]:
                 known = load_registry().get(spot_key(station), {})
@@ -2018,6 +2043,9 @@ if not dataset_path.exists() and STATION:
         f"MeteoSwiss station {STATION} · {spot['height']:.0f} m · {LOCAL_TZ}. "
         "Every hour the station has measured, from MeteoSwiss open data; "
         "no account needed. It can take a minute or two."
+        + ("" if meteoswiss_stations()["has_temp"].get(STATION, True) else
+           " It measures no air temperature, so it borrows it from the nearest station "
+           "that does, corrected for the difference in height.")
     )
     if st.button("Fetch from MeteoSwiss", type="primary"):
         bar = st.progress(0.0, text="Asking MeteoSwiss for the station's files...")
@@ -3386,10 +3414,14 @@ if st.session_state["mode"] == "explore":
         section("Air temperature", "on average in your hours on the water: air, not water")
         st.altair_chart(air_chart(by_month), width="stretch")
         warm, cool = int(by_month.idxmax()), int(by_month.idxmin())
+        with xr.open_dataset(dataset_path) as ds:
+            lender = ds.attrs.get("air_from")
         st.caption(
             f"Warmest in {calendar.month_name[warm]}, about {by_month[warm]:.0f} °C: "
             f"{kit_for(by_month[warm])}. Coolest in {calendar.month_name[cool]}, about "
             f"{by_month[cool]:.0f} °C: {kit_for(by_month[cool])}."
+            + (f" This station measures no air temperature: it comes from {lender}, the "
+               "nearest one that does, corrected for the difference in height." if lender else "")
         )
 
     if "spots" in shown:
@@ -3819,10 +3851,7 @@ if st.session_state["mode"] == "rating":
     with expect_col:
         with st.container(border=True):
             st.markdown("##### :material/lightbulb: What to expect")
-            missing_temp = (
-                "This station does not record air temperature." if STATION else
-                "No temperature in this download — refetch the location to include it."
-            )
+            missing_temp = "No air temperature in this download."
             for line in what_to_expect(rating, activity, SESSION_TEXT, missing_temp):
                 st.markdown(line)
 

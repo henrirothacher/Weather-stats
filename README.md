@@ -17,7 +17,9 @@ Built with Streamlit on three sources, picked on the start screen:
 The station maps show only stations by the water: within 5 km of the sea or
 a lake, as [Natural Earth](https://www.naturalearthdata.com/) maps the
 shores (public domain), and for MeteoSwiss not on a summit. A switch on the
-start screen shows them all, for lakes too small for Natural Earth.
+start screen shows them all, for lakes too small for Natural Earth. A
+MeteoSwiss station that measures no air temperature borrows it from the
+nearest one that does, corrected for the difference in height.
 
 A spot you have not named is called after the nearest well-known town, from
 [GeoNames](https://www.geonames.org/) (towns of 15,000 people or more,
