@@ -1,8 +1,8 @@
 # Wind atlas
 
 Pick any point on earth or any Swiss weather station, pull its wind
-history, and see whether it is worth sailing — by month and by time of
-day.
+history, and see whether it is worth sailing — by month, by time of day,
+and against your other spots.
 
 Built with Streamlit on two sources, picked on the start screen:
 

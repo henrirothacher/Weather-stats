@@ -746,6 +746,16 @@ def spot_title(spot):
     return name
 
 
+def spot_names(spots):
+    """Each spot's title, with its key added where two share one."""
+    titles = {key: spot_title(entry) for key, entry in spots.items()}
+    names = list(titles.values())
+    return {
+        key: title if names.count(title) == 1 else f"{title} · {key}"
+        for key, title in titles.items()
+    }
+
+
 def km_from(latitude, longitude, lats, lons):
     """How far each of many points is from one, in km."""
     # A flat projection around the point is plenty to tell near from far;
@@ -1825,6 +1835,7 @@ if not dataset_path.exists():
 df = load_wind(dataset_path, dataset_path.stat().st_mtime, LOCAL_TZ)
 data_start = df.index.min().date()
 data_end = df.index.max().date()
+HAS_TEMP = "temp_c" in df.columns and bool(df["temp_c"].notna().any())
 
 
 RATING_YEARS = 20
@@ -2019,7 +2030,7 @@ CHOICES = [
     ("rating", "One number", "Rate this spot",
      "One score out of ten for what you sail.", "Rate it"),
     ("explore", "The whole picture", "Explore this spot",
-     "Windy days month by month, and the wind rose of each month.",
+     "Windy days month by month and the wind rose, with more to switch on in the settings.",
      "Explore"),
 ]
 # Knots across the sport's ruler: enough for the kite's top end.
@@ -2220,7 +2231,8 @@ def settings(mode):
 # --- Explore: the spot at a glance -----------------------------------------
 # What the wind does here all year on one screen: four figures, the windy
 # days month by month, and the wind rose of the month you click beside the
-# map, with your settings in the sidebar.
+# map. Everything else waits in the sidebar under "Show more", a switch a
+# view, so the page starts simple and grows only as far as you ask.
 
 POINT_WORDS = {"N": "north", "E": "east", "S": "south", "W": "west"}
 
@@ -2233,6 +2245,31 @@ ANSWER_CSS = """
     border-radius: 50%; background: var(--c);
 }
 
+/* Your spots side by side. */
+.spots { display: grid; gap: .55rem; max-width: 820px; }
+.spot-row {
+    display: grid; grid-template-columns: minmax(0, 13rem) minmax(0, 1fr) 8.5rem;
+    align-items: center; gap: .9rem; font-size: .88rem;
+    animation: riseIn .4s ease both; animation-delay: calc(var(--r) * 45ms);
+}
+.spot-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #c5d0da; }
+.spot-row.here .spot-name { font-weight: 700; color: #fb8500; }
+.spot-bar { height: 10px; border-radius: 5px; background: #141c25; overflow: hidden; }
+.spot-bar i {
+    display: block; width: var(--v); height: 100%; border-radius: 5px; background: #5b6b7a;
+    transform-origin: left; animation: bandGrow .7s cubic-bezier(.2, .7, .3, 1) both;
+    animation-delay: calc(var(--r) * 45ms + .2s);
+}
+.spot-row.here .spot-bar i { background: #e37100; }
+.spot-num { text-align: right; font-weight: 600; color: #e8eef5; font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) {
+    .spot-row { grid-template-columns: minmax(0, 1fr) auto; gap: .3rem .8rem; }
+    .spot-bar { grid-column: 1 / -1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .spot-bar i { animation: none !important; }
+}
 </style>
 """
 
@@ -2241,6 +2278,11 @@ def compass_words(point):
     """ENE as said aloud: east-northeast."""
     words = [POINT_WORDS[letter] for letter in point]
     return f"{words[0]}-{''.join(words[1:])}" if len(words) == 3 else "".join(words)
+
+
+def ordinal(number):
+    suffix = "th" if 11 <= number % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(number % 10, "th")
+    return f"{number}{suffix}"
 
 
 def water_hours(hours):
@@ -2256,6 +2298,13 @@ def best_hours(pct, hours, length=3):
     return max(runs, key=lambda run: pct.reindex(run).fillna(0).mean())
 
 
+EXTRAS = {
+    "day": "Through the day",
+    "years": "Year by year",
+    "air": "Air temperature",
+    "spots": "Your other spots",
+    "numbers": "The numbers",
+}
 MONTHS = [calendar.month_abbr[month] for month in range(1, 13)]
 
 
@@ -2309,9 +2358,83 @@ def month_chart(share):
     return alt.layer(*layers).properties(height=470)
 
 
+def day_chart(share, hours):
+    """Each hour of the day as nested areas, one per speed band, with your
+    hours on the water shaded."""
+    start, end = hours
+    spans = [(start, end + 1)] if start <= end else [(start, 24), (0, end + 1)]
+    x = alt.X("hour:Q", scale=alt.Scale(domain=[0, 24]), title=None,
+              axis=alt.Axis(values=list(range(0, 25, 3)), labelExpr="datum.value + 'h'",
+                            ticks=False, domain=False, grid=False))
+    layers = [
+        alt.Chart(pd.DataFrame(spans, columns=["hour", "until"]))
+        .mark_rect(color="#8ecae6", opacity=0.08).encode(x=x, x2="until:Q")
+    ]
+    for threshold, colour in zip(share.columns, THRESHOLD_COLORS):
+        rows = pd.DataFrame({
+            "hour": np.arange(24) + 0.5,
+            "pct": share[threshold].reindex(range(24)).fillna(0).to_numpy(),
+        })
+        layers.append(
+            alt.Chart(rows).mark_area(color=colour, opacity=0.9, interpolate="monotone")
+            .encode(x=x, y=alt.Y("pct:Q", title="% of hours", scale=alt.Scale(domain=[0, 100])))
+        )
+    return alt.layer(*layers).properties(height=280)
+
+
+def year_chart(days):
+    """A square per month of each year: the brighter, the more of its days
+    brought your wind."""
+    grid = (
+        days.groupby([days.index.year.rename("year"), days.index.month.rename("month")]).mean()
+        .mul(100).rename("pct").reset_index()
+    )
+    grid["name"] = [MONTHS[month - 1] for month in grid["month"]]
+    return alt.Chart(grid).mark_rect(cornerRadius=2, stroke="#0a0e13", strokeWidth=1.5).encode(
+        x=alt.X("name:N", sort=MONTHS, title=None,
+                axis=alt.Axis(orient="top", labelAngle=0, ticks=False, domain=False)),
+        y=alt.Y("year:O", sort="descending", title=None, axis=alt.Axis(ticks=False, domain=False)),
+        color=alt.Color(
+            "pct:Q", title="% of days", scale=alt.Scale(
+                domain=[0, 100], range=["#141c25", "#7a3d05", "#fb8500", "#ffb703"]),
+            legend=alt.Legend(orient="bottom", gradientLength=240),
+        ),
+        tooltip=[alt.Tooltip("year:O"), alt.Tooltip("name:N", title="month"),
+                 alt.Tooltip("pct:Q", title="% of days with your wind", format=".0f")],
+    ).properties(height=alt.Step(22))
+
+
+def air_chart(by_month):
+    """The air month by month, each point carrying its degrees."""
+    rows = pd.DataFrame({
+        "name": MONTHS, "celsius": by_month.reindex(range(1, 13)).to_numpy(),
+    }).dropna()
+    rows["wear"] = [kit_for(celsius) for celsius in rows["celsius"]]
+    line = alt.Chart(rows).encode(
+        x=alt.X("name:N", sort=MONTHS, title=None,
+                axis=alt.Axis(labelAngle=0, ticks=False, domain=False)),
+        y=alt.Y("celsius:Q", title="°C", scale=alt.Scale(zero=False)),
+    )
+    return alt.layer(
+        line.mark_line(color="#fb8500", strokeWidth=2.5, interpolate="monotone"),
+        line.mark_circle(color="#fb8500", size=80, opacity=1).encode(
+            tooltip=[alt.Tooltip("name:N", title="month"),
+                     alt.Tooltip("celsius:Q", title="°C", format=".0f"),
+                     alt.Tooltip("wear:N", title="what to wear")]),
+        line.mark_text(dy=-15, color="#e8eef5", fontSize=12)
+        .encode(text=alt.Text("celsius:Q", format=".0f")),
+    ).properties(height=260)
+
+
 if st.session_state["mode"] == "explore":
     st.html(ANSWER_CSS)
     activity = settings("explore")
+    st.sidebar.subheader("Show more")
+    shown = {
+        key for key, label in EXTRAS.items()
+        if (key != "air" or HAS_TEMP)
+        and remembered(st.sidebar.toggle, label, key=f"show_{key}", default=False)
+    }
     ladder = ACTIVITIES[activity]["ladder"]
     wind = tuple(kept(f"wind_{activity}", ACTIVITIES[activity]["groove"]))
     hours = tuple(kept("hours", DEFAULT_HOURS))
@@ -2335,7 +2458,7 @@ if st.session_state["mode"] == "explore":
     )
     st.caption(
         f"{years_text} · your hours on the water {hours_text}, local time · "
-        f"data: {SOURCE_CREDIT}"
+        f"data: {SOURCE_CREDIT} · more under Show more, in the settings on the left"
     )
 
     # Four figures: how often, when in the year, when in the day, from where.
@@ -2395,6 +2518,82 @@ if st.session_state["mode"] == "explore":
             st.info("No readings in your hours.")
         locator_map(LATITUDE, LONGITUDE, key="explore_map", height=220, cell=not STATION)
 
+    if "day" in shown:
+        st.divider()
+        hourly = knots if month is None else knots[recent.index.month == month]
+        section(f"{when} through the day",
+                "the share of hours that top each speed; shaded, your hours on the water")
+        st.html(band_legend(ladder))
+        st.altair_chart(day_chart(over_bands(hourly, hourly.index.hour, ladder), hours),
+                        width="stretch")
+
+    if "years" in shown and len(days):
+        st.divider()
+        section("Year by year", f"the share of days with {wind_words(wind)}, month by month")
+        st.altair_chart(year_chart(days), width="stretch")
+
+    if "air" in shown:
+        st.divider()
+        air = recent.loc[water, "temp_c"]
+        by_month = air.groupby(air.index.month).mean()
+        section("Air temperature", "on average in your hours on the water: air, not water")
+        st.altair_chart(air_chart(by_month), width="stretch")
+        warm, cool = int(by_month.idxmax()), int(by_month.idxmin())
+        st.caption(
+            f"Warmest in {calendar.month_name[warm]}, about {by_month[warm]:.0f} °C: "
+            f"{kit_for(by_month[warm])}. Coolest in {calendar.month_name[cool]}, about "
+            f"{by_month[cool]:.0f} °C: {kit_for(by_month[cool])}."
+        )
+
+    if "spots" in shown:
+        st.divider()
+        spots = downloaded_locations()
+        names = spot_names(spots)
+        rows = []
+        with st.spinner("Counting days at your other spots..."):
+            for key, entry in spots.items():
+                path = entry["path"]
+                found = good_days(path, path.stat().st_mtime, entry["zone"], years_back,
+                                  wind, lasting, hours)
+                rows.append((float(found.mean() * 100) if len(found) else 0.0,
+                             names[key], path == dataset_path))
+        rows.sort(reverse=True)
+        rank = next((place for place, row in enumerate(rows, 1) if row[2]), None)
+        section(
+            "The best of your spots" if rank == 1
+            else f"{ordinal(rank)} of your {len(rows)} spots" if rank
+            else f"Your {len(rows)} spots side by side",
+            "the same wind and hours at every spot you have downloaded, each in its own local time",
+        )
+        st.html('<div class="spots">' + "".join(
+            f'<div class="spot-row{" here" if here_spot else ""}" style="--r:{index}">'
+            f'<span class="spot-name" title="{html.escape(name)}">{html.escape(name)}</span>'
+            f'<span class="spot-bar"><i style="--v:{pct:.1f}%"></i></span>'
+            f'<span class="spot-num">{pct / 100 * 365:.0f} days a year</span></div>'
+            for index, (pct, name, here_spot) in enumerate(rows)
+        ) + "</div>")
+
+    if "numbers" in shown:
+        st.divider()
+        section("The numbers", "month by month, over your hours on the water")
+        table = pd.DataFrame({
+            "Month": MONTHS,
+            "Days with your wind": [
+                per_month.get(number, 0) * calendar.monthrange(2001, number)[1]
+                for number in range(1, 13)
+            ],
+            **{f"% over {threshold} kt": month_share[threshold].reindex(range(1, 13)).to_numpy()
+               for threshold in ladder},
+        })
+        # Tall enough for all twelve months without scrolling.
+        st.dataframe(table.round(0), hide_index=True, width="stretch", height=460)
+        st.download_button(
+            "Every day as CSV",
+            days.rename("with_your_wind").rename_axis("date").to_csv().encode(),
+            file_name=f"days-{STATION}.csv" if STATION
+            else f"days-{LATITUDE:+.2f}_{LONGITUDE:+.2f}.csv",
+            mime="text/csv", type="tertiary", icon=":material/download:",
+        )
     st.stop()
 
 
