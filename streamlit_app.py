@@ -672,7 +672,7 @@ NEARBY_STATIONS = 200
 # A station this close to the sea or a lake, in km, is by the water. The
 # shores are Natural Earth's (public domain): coasts and lakes at 1:10m,
 # with the extra lakes it maps for Europe and North America.
-SHORE_KM = 10
+SHORE_KM = 20
 SHORES = data_dir / "shores.npy"
 NATURAL_EARTH = "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson"
 SHORE_LAYERS = ["coastline", "lakes", "lakes_europe", "lakes_north_america"]
