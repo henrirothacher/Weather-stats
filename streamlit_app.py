@@ -609,7 +609,7 @@ GUSTY_CV = 0.5
 # How the overall score is put together. Whether the wind is any good carries
 # most of the weight; how much it wanders through the day carries least.
 RATING_WEIGHTS = {
-    "Days in the groove": 0.55,
+    "Days with your wind": 0.55,
     "Season length": 0.20,
     "Big days": 0.15,
     "Steadiness": 0.10,
@@ -1364,16 +1364,6 @@ def wind_words(wind):
     if high >= WIND_TOP:
         return f"{low}+ kn"
     return f"up to {high} kn" if low == 0 else f"{low}–{high} kn"
-
-
-def sessions_mask(index, windows):
-    """True where the hour falls in any of the chosen sailing windows."""
-    if not windows or any(window is None for window in windows):
-        return pd.Series(True, index=index)
-    combined = pd.Series(False, index=index)
-    for window in windows:
-        combined |= hour_mask(index, window)
-    return combined
 
 
 # A window of dates is ((month, day), (month, day)) and holds in every year:
@@ -2229,9 +2219,6 @@ data_end = df.index.max().date()
 HAS_TEMP = "temp_c" in df.columns and bool(df["temp_c"].notna().any())
 
 
-RATING_YEARS = 20
-
-
 # Air temperature bands (Celsius) -> what you would put on. Air, not water,
 # so treat it as a hint rather than gospel.
 WETSUIT = [
@@ -2250,10 +2237,10 @@ def kit_for(celsius):
     return WETSUIT[-1][1]
 
 
-def what_to_expect(rating, activity, session_text, missing_temp):
+def what_to_expect(rating, activity, wind, lasting, session_text, missing_temp):
     """Turn the numbers into the sentences you would actually say out loud."""
     groove = rating["groove_pct"]
-    low, high = ACTIVITIES[activity]["groove"]
+    low = wind[0]
     verdict = (
         "a reliable spot" if groove >= 55 else
         "worth the trip in season" if groove >= 35 else
@@ -2261,9 +2248,9 @@ def what_to_expect(rating, activity, session_text, missing_temp):
         "usually too light"
     )
     lines = [
-        f"For **{activity.lower()}** this is **{verdict}**. Sailable wind "
-        f"({low}–{high} kt) turns up on **{groove:.0f}% of days** during "
-        f"{session_text}.",
+        f"For **{activity.lower()}** this is **{verdict}**. Your wind "
+        f"({wind_words(wind)}) holds {lasting} h in a row on **{groove:.0f}% of days** "
+        f"during {session_text}.",
         f"Best odds in **{calendar.month_name[rating['best_month']]}** "
         f"({rating['best_month_pct']:.0f}% of days); thinnest in "
         f"**{calendar.month_name[rating['quiet_month']]}**.",
@@ -2289,39 +2276,40 @@ def what_to_expect(rating, activity, session_text, missing_temp):
 
 
 @st.cache_data(show_spinner=False)
-def rate_location(path, mtime, zone, first_year, activity, windows):
-    """Score a spot for one activity, over the hours you actually sail. The
-    weights are a judgement call — the four parts are shown so you can
-    disagree."""
+def rate_location(path, mtime, zone, years_back, activity, wind, lasting, hours):
+    """Score a spot for one activity, over its own last `years_back` years
+    and your hours on the water. A day counts as it does in explore and the
+    trip planner: your wind holds `lasting` hours in a row. The weights are
+    a judgement call — the four parts are shown so you can disagree."""
     frame = load_wind(path, mtime, zone)
+    first_year = lookback_start(frame, years_back)
     usable = frame[frame.index.year >= first_year]
-    usable = usable[sessions_mask(usable.index, windows)]
+    usable = usable[hour_mask(usable.index, hours)]
     knots = usable["speed"] * MS_TO_KNOTS
 
-    low, high = ACTIVITIES[activity]["groove"]
+    low = wind[0]
     # A big day reaches the third speed band. The top of the range is the
     # wrong mark: reaching it means too much wind, and ERA5's smoothed hourly
     # winds almost never get there.
     strong = ACTIVITIES[activity]["ladder"][-2]
     by_day = knots.resample("1D")
-    daily = by_day.mean().dropna()
     spread = (by_day.std() / by_day.mean()).dropna()
 
-    in_groove = daily.between(low, high)
-    groove = in_groove.mean() * 100
-    too_light = (daily < low).mean() * 100
+    good = good_days(path, mtime, zone, years_back, wind, lasting, hours)
+    groove = good.mean() * 100
+    too_light = (by_day.max().dropna() < low).mean() * 100
     big = (by_day.max().dropna() >= strong).mean() * 100
     steadiness = max(0.0, 1 - float(spread.mean()) / GUSTY_CV)
 
-    per_month = in_groove.groupby(daily.index.month).mean() * 100
+    per_month = good.groupby(good.index.month).mean() * 100
     good_months = int((per_month >= 40).sum())
     per_hour = knots.groupby(knots.index.hour).mean()
     direction = wind_direction(usable["u10"], usable["v10"])
 
     parts = {
-        "Days in the groove": (
+        "Days with your wind": (
             min(groove / 6, 10),
-            f"{groove:.0f}% of days sit in {low}–{high} kt",
+            f"{groove:.0f}% of days hold {wind_words(wind)} for {lasting} h in a row",
         ),
         "Season length": (
             good_months / 12 * 10,
@@ -2341,9 +2329,8 @@ def rate_location(path, mtime, zone, first_year, activity, windows):
     if "temp_c" in usable.columns and usable["temp_c"].notna().any():
         temps = usable["temp_c"]
         monthly = temps.groupby(temps.index.month).mean().reindex(range(1, 13))
-        on_groove_days = temps[temps.index.normalize().isin(
-            daily[in_groove].index.normalize()
-        )]
+        # Your days are local calendar days, without a zone.
+        on_groove_days = temps[temps.index.tz_localize(None).normalize().isin(good.index[good])]
         warmth = {
             "mean": float(temps.mean()),
             "curve": monthly.tolist(),
@@ -2988,18 +2975,12 @@ def settings(mode):
         index=list(ACTIVITIES).index(st.session_state["activity"]), key="activity_side",
     )
     st.session_state["activity"] = activity
-    groove = ACTIVITIES[activity]["groove"]
-    if mode == "rating":
-        side.caption(f"Sailable wind {groove[0]}–{groove[1]} kt")
-    else:
-        remembered(side.slider, "Wind", 0, WIND_TOP, format="%d kn",
-                   key=f"wind_{activity}", default=groove)
+    remembered(side.slider, "Wind", 0, WIND_TOP, format="%d kn",
+               key=f"wind_{activity}", default=ACTIVITIES[activity]["groove"])
     hours = remembered(side.slider, "On the water", 0, 23, format="%d:00",
                        key="hours", default=DEFAULT_HOURS)
     side.caption("Every hour of the day" if hours == (0, 23)
                  else f"{hours[0]:02d}:00–{hours[1]:02d}:59 local time")
-    if mode == "rating":
-        return activity
     remembered(side.segmented_control, "In a row", [1, 2, 3], format_func=lambda h: f"{h} h",
                required=True, key="lasting", default=DEFAULT_LASTING, start="default")
     if mode == "window":
@@ -4015,16 +3996,17 @@ if st.session_state["mode"] == "rating":
             "score. Pick what you sail in the sidebar."
         )
         st.stop()
-    groove_low, groove_high = ACTIVITIES[activity]["groove"]
+    # The same settings explore and the trip planner count with.
+    wind = tuple(kept(f"wind_{activity}", ACTIVITIES[activity]["groove"]))
     hours = tuple(kept("hours", DEFAULT_HOURS))
-    SESSION_WINDOWS = (hours,)
+    lasting = kept("lasting", DEFAULT_LASTING)
+    years_back = LOOKBACK[kept("years", DEFAULT_YEARS)]
     SESSION_TEXT = "all day" if hours == (0, 23) else f"{hours[0]:02d}:00–{hours[1]:02d}:59"
 
-    first_year = max(data_start.year, data_end.year - RATING_YEARS + 1)
-    with st.spinner("Reading the last 20 years..."):
+    with st.spinner("Counting your days..."):
         rating = rate_location(
-            dataset_path, dataset_path.stat().st_mtime, LOCAL_TZ, first_year,
-            activity, SESSION_WINDOWS,
+            dataset_path, dataset_path.stat().st_mtime, LOCAL_TZ, years_back,
+            activity, wind, lasting, hours,
         )
 
     fresh = st.session_state.pop("rating_fresh", False)
@@ -4057,8 +4039,8 @@ if st.session_state["mode"] == "rating":
         + "</div>"
     )
     st.caption(
-        f"Scored on {rating['years']}, counting {SESSION_TEXT} local. "
-        f"Data: {SOURCE_CREDIT}."
+        f"Scored on {rating['years']}: {wind_words(wind)} for {lasting} h in a row, "
+        f"{SESSION_TEXT} local time. Data: {SOURCE_CREDIT}."
     )
 
     expect_col, parts_col = st.columns([2, 3], gap="medium")
@@ -4067,7 +4049,8 @@ if st.session_state["mode"] == "rating":
         with st.container(border=True):
             st.markdown("##### :material/lightbulb: What to expect")
             missing_temp = "No air temperature in this download."
-            for line in what_to_expect(rating, activity, SESSION_TEXT, missing_temp):
+            for line in what_to_expect(rating, activity, wind, lasting, SESSION_TEXT,
+                                       missing_temp):
                 st.markdown(line)
 
     with parts_col:
@@ -4087,7 +4070,8 @@ if st.session_state["mode"] == "rating":
     highlights[0].metric(
         "Best month", calendar.month_name[rating["best_month"]], border=True,
         icon=":material/trending_up:",
-        help=f"{rating['best_month_pct']:.0f}% of days sit in {groove_low}–{groove_high} kt",
+        help=f"{rating['best_month_pct']:.0f}% of days hold {wind_words(wind)} "
+        f"for {lasting} h in a row",
         chart_data=rating["month_curve"], chart_type="area",
     )
     highlights[1].metric(
