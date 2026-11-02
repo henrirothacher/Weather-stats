@@ -7,6 +7,11 @@ day, and when, and at which of your spots, the wind you want turns up most.
 Built with Streamlit on three sources, picked on the start screen:
 
 - **ERA5** — ECMWF's reanalysis, hourly, 1940–present, 0.25° grid, anywhere.
+- **AROME HD** — Météo-France's 1.5 km model over western Europe
+  (37.5–55.4°N, 12°W–16°E), hourly since 13 November 2022, as
+  [Open-Meteo](https://open-meteo.com/) archives it (CC BY 4.0). The first
+  hours of each forecast run stitched together, not a reanalysis, and only
+  a few years of it: a single odd summer carries weight.
 - **MeteoSwiss** — measured hourly wind from the ~150 SwissMetNet stations,
   most since 1981 (open data, CC BY 4.0).
 - **METAR** — the weather reports of ~5,900 airports worldwide, as archived
@@ -28,8 +33,8 @@ CC BY 4.0): "Lake Balaton near Tapolca", "Strait of Gibraltar, 26 km N of
 Tangier".
 
 Comparing spots keeps to one kind by default, stations with stations and
-ERA5 cells with ERA5 cells; a switch opens it to all, in explore's settings
-and in the trip planner's comparison.
+model cells with model cells; a switch opens it to all, in explore's
+settings and in the trip planner's comparison.
 
 ## Run locally
 
@@ -58,6 +63,8 @@ when the app restarts.
 
 - `streamlit_app.py` — the whole app
 - `data/wind_<lat>_<lon>.nc` — one cached ERA5 cell per file
+- `data/arome_<lat>_<lon>.nc` — one AROME HD cell per file, in the same
+  layout
 - `data/station_<code>.nc` — one MeteoSwiss station per file, converted to
   the same layout (`u10`, `v10`, `t2m` on `valid_time`)
 - `data/metar_<code>.nc` — one airport per file, in that same layout
