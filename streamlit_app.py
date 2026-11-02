@@ -753,9 +753,7 @@ def meteoswiss_stations():
         since.reindex(table.index), format="%d.%m.%Y %H:%M"
     ).dt.year
     table["has_temp"] = table.index.isin(offered.get("tre200h0", set()))
-    # A summit station looks down on the water rather than standing by it.
-    summit = stations["station_exposition_en"].reindex(table.index) == "crest"
-    table["by_water"] = by_a_shore(table) & ~summit
+    table["summit"] = stations["station_exposition_en"].reindex(table.index) == "crest"
     return table.sort_values("name")
 
 
@@ -783,10 +781,9 @@ def metar_stations():
     table = pd.DataFrame({
         "name": names, "lat": table["lat"], "lon": table["lon"], "height": table["elev"],
         "since": pd.to_datetime(table["begints"]).dt.year,
-        # Every METAR carries the air temperature.
-        "has_temp": True,
+        # Every METAR carries the air temperature, and no airport is on a summit.
+        "has_temp": True, "summit": False,
     })
-    table["by_water"] = by_a_shore(table)
     return table.sort_values("name")
 
 
@@ -910,16 +907,18 @@ def shores():
     return np.load(SHORES) / 100
 
 
-def by_a_shore(stations):
-    """Which stations lie within SHORE_KM of the sea or a lake shore. Each
-    looks only at the shore in its own band of latitude."""
+@st.cache_data(ttl="1d", show_spinner="Finding the stations by the water...")
+def by_a_shore(stations, km):
+    """Which stations lie within `km` of the sea or a lake shore. Each looks
+    only at the shore in its own band of latitude. The distance comes in as
+    an argument, so the cache starts over when SHORE_KM changes."""
     points = shores()
-    reach = SHORE_KM / 111  # in degrees of latitude
+    reach = km / 111  # in degrees of latitude
     near = []
     for latitude, longitude in zip(stations["lat"], stations["lon"]):
         low, high = np.searchsorted(points[:, 0], [latitude - reach, latitude + reach])
         band = points[low:high]
-        near.append(bool((km_from(latitude, longitude, band[:, 0], band[:, 1]) <= SHORE_KM).any()))
+        near.append(bool((km_from(latitude, longitude, band[:, 0], band[:, 1]) <= km).any()))
     return pd.Series(near, index=stations.index)
 
 
@@ -1778,7 +1777,8 @@ if st.session_state["spot"] is None:
         except Exception as error:
             stations_error = error
     if stations is not None and by_water:
-        stations = stations[stations["by_water"]]
+        # A summit station looks down on the water rather than standing by it.
+        stations = stations[by_a_shore(stations, SHORE_KM) & ~stations["summit"]]
 
     if source == "metar":
         pitch = (
