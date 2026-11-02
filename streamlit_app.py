@@ -30,7 +30,7 @@ st.set_page_config(
 )
 
 # Goes up by 0.1 with every commit pushed to GitHub (2.9 -> 3.0).
-APP_VERSION = "2.5"
+APP_VERSION = "2.6"
 
 def svg_image(markup, view_box, css_class=""):
     """A drawing for st.html. Its sanitiser drops <svg> outright but lets an
@@ -630,7 +630,7 @@ WIND_TOP = 50
 LOOKBACK = {"10 years": 10, "20 years": 20, "All": None}
 # Where explore and the trip planner start, before you change anything.
 DEFAULT_HOURS = (10, 17)
-DEFAULT_LASTING = 2
+DEFAULT_LASTING = 3
 DEFAULT_YEARS = "20 years"
 # Stations beside stations and ERA5 cells beside ERA5 cells, unless you say otherwise.
 DEFAULT_LIKE_WITH_LIKE = True
@@ -2622,15 +2622,48 @@ def ask_wind(activity):
 
 
 def ask_hours():
-    remembered(
+    hours = remembered(
         st.slider, "On the water", 0, 23, format="%d:00", label_visibility="collapsed",
         key="hours", default=DEFAULT_HOURS,
     )
-    remembered(
-        st.segmented_control, "In a row", [1, 2, 3],
-        format_func=lambda h: f"{h} h in a row", required=True,
-        label_visibility="collapsed", key="lasting", default=DEFAULT_LASTING, start="default",
+    ask_lasting(st, hours)
+
+
+# How long your wind has to hold: a button for each of one to five hours,
+# and Other for a length of your own.
+LASTING_BUTTONS = 5
+
+
+def ask_lasting(place, hours):
+    """How many hours in a row your wind has to hold, drawn in `place`. No
+    longer than your `hours` on the water: no day could hold a longer run
+    inside them. Kept as one number under "lasting", whether picked or typed."""
+    longest = (hours[1] - hours[0]) % 24 + 1
+    picks = [*range(1, min(LASTING_BUTTONS, longest) + 1)]
+    picks += ["other"] if longest > LASTING_BUTTONS else []
+    held = kept("lasting", DEFAULT_LASTING)
+    if held > longest:
+        held = longest
+        st.toast(f"In a row is now {held} h: your hours on the water are {held} h long.",
+                 icon=":material/schedule:")
+    # Where the kept choice no longer fits, the widgets start from the number
+    # kept, and reset to it themselves.
+    if st.session_state.get("kept_lasting_pick", DEFAULT_LASTING) not in picks:
+        st.session_state["kept_lasting_pick"] = held if held <= LASTING_BUTTONS else "other"
+    if st.session_state.get("kept_lasting_own", 0) > longest:
+        st.session_state["kept_lasting_own"] = longest
+    choice = remembered(
+        place.segmented_control, "In a row", picks, required=True,
+        format_func=lambda h: "Other" if h == "other" else f"{h} h",
+        key="lasting_pick", default=DEFAULT_LASTING, start="default",
     )
+    if choice == "other":
+        choice = remembered(
+            place.number_input, "Hours in a row", min_value=1, max_value=longest, step=1,
+            key="lasting_own", default=LASTING_BUTTONS + 1, width=200,
+            help=f"Up to {longest} h, the length of your hours on the water.",
+        )
+    st.session_state["kept_lasting"] = int(choice)
 
 
 # The dates as a calendar you click: your first day, then your last, the
@@ -2981,8 +3014,7 @@ def settings(mode):
                        key="hours", default=DEFAULT_HOURS)
     side.caption("Every hour of the day" if hours == (0, 23)
                  else f"{hours[0]:02d}:00–{hours[1]:02d}:59 local time")
-    remembered(side.segmented_control, "In a row", [1, 2, 3], format_func=lambda h: f"{h} h",
-               required=True, key="lasting", default=DEFAULT_LASTING, start="default")
+    ask_lasting(side, hours)
     if mode == "window":
         side_dates("trip_dates", coming_dates(*TRIP_DAYS), YEAR_ROWS_UP_TO)
     remembered(side.segmented_control, "Years", list(LOOKBACK), required=True,
