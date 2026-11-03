@@ -30,7 +30,7 @@ st.set_page_config(
 )
 
 # Goes up by 0.1 with every commit pushed to GitHub (2.9 -> 3.0).
-APP_VERSION = "2.7"
+APP_VERSION = "2.8"
 
 def svg_image(markup, view_box, css_class=""):
     """A drawing for st.html. Its sanitiser drops <svg> outright but lets an
@@ -1143,23 +1143,45 @@ def in_arome_area(latitude, longitude):
     return south <= latitude <= north and west <= longitude <= east
 
 
-def fetch_arome(spot, target):
+def open_meteo(spot, first, last):
+    """Open-Meteo's hourly AROME HD answer for a cell over a span of days,
+    asked up to three times: it answers in a second as a rule, and a slow
+    spell on its side should cost a retry rather than the download. The
+    nearest cell: for a point on the water it would otherwise reach for one
+    on land."""
+    for attempt in range(3):
+        try:
+            response = requests.get(OPEN_METEO, params={
+                "latitude": spot["lat"], "longitude": spot["lon"],
+                "start_date": first.isoformat(), "end_date": last.isoformat(),
+                "hourly": "wind_speed_10m,wind_direction_10m,temperature_2m",
+                "models": "meteofrance_arome_france_hd", "wind_speed_unit": "ms",
+                "timezone": "GMT", "cell_selection": "nearest",
+            }, timeout=60)
+        except (requests.Timeout, requests.ConnectionError):
+            if attempt == 2:
+                raise
+            continue
+        answer = response.json() if "json" in response.headers.get("content-type", "") else {}
+        if answer.get("error"):
+            raise RuntimeError(answer.get("reason", "Open-Meteo gave no answer"))
+        response.raise_for_status()
+        return answer
+
+
+def fetch_arome(spot, target, progress=None):
     """Every hour of AROME HD that Open-Meteo holds for a cell, from the first
-    day of its archive to yesterday, in one request. The nearest cell: for a
-    point on the water Open-Meteo would otherwise reach for one on land."""
-    response = requests.get(OPEN_METEO, params={
-        "latitude": spot["lat"], "longitude": spot["lon"],
-        "start_date": AROME_SINCE.isoformat(),
-        "end_date": (date.today() - timedelta(days=1)).isoformat(),
-        "hourly": "wind_speed_10m,wind_direction_10m,temperature_2m",
-        "models": "meteofrance_arome_france_hd", "wind_speed_unit": "ms",
-        "timezone": "GMT", "cell_selection": "nearest",
-    }, timeout=300)
-    answer = response.json() if "json" in response.headers.get("content-type", "") else {}
-    if answer.get("error"):
-        raise RuntimeError(answer.get("reason", "Open-Meteo gave no answer"))
-    response.raise_for_status()
-    frame = pd.DataFrame(answer["hourly"]).dropna(subset=["wind_speed_10m", "wind_direction_10m"])
+    day of its archive to yesterday, a year at a time. `progress(done,
+    total)` hears about each year as it lands."""
+    last = date.today() - timedelta(days=1)
+    years = range(AROME_SINCE.year, last.year + 1)
+    pieces = []
+    for done, year in enumerate(years, 1):
+        answer = open_meteo(spot, max(AROME_SINCE, date(year, 1, 1)), min(last, date(year, 12, 31)))
+        pieces.append(pd.DataFrame(answer["hourly"]))
+        if progress:
+            progress(done, len(years))
+    frame = pd.concat(pieces, ignore_index=True).dropna(subset=["wind_speed_10m", "wind_direction_10m"])
     if frame.empty:
         raise RuntimeError("Open-Meteo holds no AROME hours for this cell")
     return save_record(
@@ -2204,25 +2226,50 @@ if nav.button(":material/home: Start over", type="tertiary"):
 
 
 # --- Stage 2: make sure this location has data ----------------------------
+# The free sources start downloading the moment you arrive, nothing to
+# press; ERA5 waits for how far back you want, and for a Copernicus account.
+
+
+def fetch_now(fetch, what, clear=None):
+    """Run `fetch` straight away. Done, the app goes on to the spot; failed,
+    it says why and offers another go. `clear` tidies a progress bar away first."""
+    try:
+        fetch()
+    except Exception as error:
+        if clear:
+            clear()
+        st.error(f"Could not fetch that {what}: {error}")
+        st.button("Try again", icon=":material/refresh:")
+        st.stop()
+    st.rerun()
+
+
+def progress_bar(opening, unit):
+    """A bar that counts `unit`s as they land, and the report that moves it."""
+    bar = st.progress(0.0, text=opening)
+
+    def report(done, total):
+        bar.progress(
+            done / total,
+            text=f"Downloaded {done} of {total} {unit}" if done < total
+            else f"All {unit} in, joining them into one record...",
+        )
+
+    return bar, report
+
 
 if not dataset_path.exists() and STATION and spot["source"] == "metar":
-    st.subheader(f"Download the record for {LOCATION_NAME}")
+    st.subheader(f"Downloading the record for {LOCATION_NAME}")
     st.caption(
         f"METAR station {STATION} · {spot['height']:.0f} m · {LOCAL_TZ}. "
         "Every report the airport has sent, from the Iowa Environmental Mesonet's "
         "archive; no account needed. It can take a minute."
     )
-    if st.button("Fetch the METARs", type="primary"):
-        with st.spinner("The Iowa Environmental Mesonet is gathering every report..."):
-            try:
-                fetch_metar(spot, dataset_path)
-                st.rerun()
-            except Exception as error:
-                st.error(f"Could not fetch that airport: {error}")
-    st.stop()
+    with st.spinner("The Iowa Environmental Mesonet is gathering every report..."):
+        fetch_now(lambda: fetch_metar(spot, dataset_path), "airport")
 
 if not dataset_path.exists() and STATION:
-    st.subheader(f"Download the record for {LOCATION_NAME}")
+    st.subheader(f"Downloading the record for {LOCATION_NAME}")
     st.caption(
         f"MeteoSwiss station {STATION} · {spot['height']:.0f} m · {LOCAL_TZ}. "
         "Every hour the station has measured, from MeteoSwiss open data; "
@@ -2231,42 +2278,20 @@ if not dataset_path.exists() and STATION:
            " It measures no air temperature, so it borrows it from the nearest station "
            "that does, corrected for the difference in height.")
     )
-    if st.button("Fetch from MeteoSwiss", type="primary"):
-        bar = st.progress(0.0, text="Asking MeteoSwiss for the station's files...")
-
-        def report(done, total):
-            bar.progress(
-                done / total,
-                text=f"Downloaded {done} of {total} files" if done < total
-                else "All files in, joining them into one record...",
-            )
-
-        try:
-            fetch_station(spot, dataset_path, progress=report)
-            st.success("Downloaded.")
-            st.rerun()
-        except Exception as error:
-            bar.empty()
-            st.error(f"Could not fetch that station: {error}")
-    st.stop()
+    bar, report = progress_bar("Asking MeteoSwiss for the station's files...", "files")
+    fetch_now(lambda: fetch_station(spot, dataset_path, progress=report), "station", bar.empty)
 
 if not dataset_path.exists() and SOURCE == "arome":
-    st.subheader(f"Download the record for {LOCATION_NAME}")
+    st.subheader(f"Downloading the record for {LOCATION_NAME}")
     st.caption(
         f"AROME HD cell {LATITUDE:+.2f}, {LONGITUDE:+.2f} · {LOCAL_TZ}. Every hour since "
         f"{AROME_SINCE:%d %B %Y} of Météo-France's 1.5 km model, as Open-Meteo archives it; "
-        "no account needed, about a minute. Mind that it is the first hours of each "
+        "no account needed, a year at a time. Mind that it is the first hours of each "
         "forecast run stitched together, not a reanalysis, and only a few years of them: "
         "one odd summer carries weight."
     )
-    if st.button("Fetch from Open-Meteo", type="primary"):
-        with st.spinner("Open-Meteo is gathering every hour since 2022..."):
-            try:
-                fetch_arome(spot, dataset_path)
-                st.rerun()
-            except Exception as error:
-                st.error(f"Could not fetch that cell: {error}")
-    st.stop()
+    bar, report = progress_bar("Asking Open-Meteo for the first year...", "years")
+    fetch_now(lambda: fetch_arome(spot, dataset_path, progress=report), "cell", bar.empty)
 
 if not dataset_path.exists():
     st.subheader(f"Download the record for {LOCATION_NAME}")
