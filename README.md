@@ -59,6 +59,12 @@ Note: the hosted filesystem is ephemeral. Locations committed under `data/`
 are always available; anything downloaded from the running app disappears
 when the app restarts.
 
+Everyone who opens the hosted app shares that folder, so it is a cache, not
+anybody's list. Which spots are yours lives in the page address instead
+(`?spot=36.75_-8.25&spot=metar_LEPA`): bookmark it to keep them, send it to
+share them. A spot whose record a restart has swept away stays in your list
+and is fetched again when you open it.
+
 ## Layout
 
 - `streamlit_app.py` — the whole app
@@ -68,7 +74,8 @@ when the app restarts.
 - `data/station_<code>.nc` — one MeteoSwiss station per file, converted to
   the same layout (`u10`, `v10`, `t2m` on `valid_time`)
 - `data/metar_<code>.nc` — one airport per file, in that same layout
-- `data/locations.json` — names you have given those cells
+- `data/locations.json` — names given to those cells and stations, shared
+  by everyone; which spots are yours is in your link, not here
 - `data/places.csv` — GeoNames towns, to name the cells you have not
 - `data/shores.npy` — every coast and lake shore point, to the nearest
   0.01°; the app builds it from Natural Earth when it is missing

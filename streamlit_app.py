@@ -30,7 +30,7 @@ st.set_page_config(
 )
 
 # Goes up by 0.1 with every commit pushed to GitHub (2.9 -> 3.0).
-APP_VERSION = "2.8"
+APP_VERSION = "2.9"
 
 def svg_image(markup, view_box, css_class=""):
     """A drawing for st.html. Its sanitiser drops <svg> outright but lets an
@@ -309,7 +309,11 @@ st.html(
     /* Text and Open button share one line; the text wraps instead. */
     [class*="st-key-spot_card_"] { flex-wrap: nowrap !important; }
     [class*="st-key-spot_card_"] > div:first-child { flex: 1 1 auto !important; min-width: 0 !important; }
-    [class*="st-key-spot_card_"] > div:last-child { flex: 0 0 auto !important; }
+    [class*="st-key-spot_card_"] > div:not(:first-child) { flex: 0 0 auto !important; }
+    /* Where your list lives, said once under it. */
+    .link-note { margin: .45rem 0 0; font-size: .82rem; line-height: 1.35; color: #8b98a5; }
+    .link-note a { color: #8ecae6; font-weight: 600; text-decoration: none; }
+    .link-note a:hover { color: #fb8500; }
 
     /* The map sits in its own rounded panel rather than running edge to edge. */
     iframe[title="streamlit_folium.st_folium"] {
@@ -1256,6 +1260,130 @@ def downloaded_locations():
     return found
 
 
+# --- Your spots: the ones in your link -----------------------------------
+# Everyone who opens the hosted app shares one data folder, so the folder is
+# a cache, nobody's list. Which spots are yours lives in the page address:
+# ?spot=36.75_-8.25&spot=metar_LEPA. Bookmark it to keep them, send it to
+# share them. Nothing is kept on the server, so a restart of the hosted app
+# loses the downloads but not your list: opening a spot fetches it again.
+
+DECIMAL = re.compile(r"-?\d+\.\d+")
+CELL_KEY = re.compile(r"(?:(arome)_)?([+-]\d+\.\d+)_([+-]\d+\.\d+)")
+STATION_KEY = re.compile(r"(station|metar)_(\w+)")
+
+LINK_NOTE_HEIGHT = 46
+LINK_NOTE = """
+<div class="link-note">Your spots live in this page's address. Bookmark it to keep
+them, send it to share them. <a href="#" id="copy-spot-link">Copy link</a></div>
+<script>
+(() => {
+  const link = document.getElementById("copy-spot-link");
+  if (!link) return;
+  link.addEventListener("click", (event) => {
+    event.preventDefault();
+    if (!navigator.clipboard) { link.textContent = "Copy the address bar"; return; }
+    navigator.clipboard.writeText(window.location.href).then(
+      () => { link.textContent = "Copied"; },
+      () => { link.textContent = "Copy the address bar"; },
+    );
+    setTimeout(() => { link.textContent = "Copy link"; }, 1600);
+  });
+})();
+</script>
+"""
+
+
+def link_token(key):
+    """A registry key as it reads in the address: without its plus signs,
+    which a browser would turn into spaces."""
+    return key.replace("+", "")
+
+
+def key_from_token(token):
+    """The registry key an address token stands for, plus signs restored."""
+    return "_".join(
+        f"{float(part):+.2f}" if DECIMAL.fullmatch(part) else part
+        for part in token.replace(" ", "").split("_")
+    )
+
+
+def link_keys():
+    """The spots in your link, in the order you added them."""
+    keys = []
+    for token in st.query_params.get_all("spot"):
+        key = key_from_token(token)
+        if key not in keys:
+            keys.append(key)
+    return keys
+
+
+def write_link(keys):
+    if keys:
+        st.query_params["spot"] = [link_token(key) for key in keys]
+    elif "spot" in st.query_params:
+        del st.query_params["spot"]
+
+
+def follow(spot):
+    """Add a spot to your link, if it is not there yet."""
+    keys = link_keys()
+    if spot_key(spot) not in keys:
+        write_link([*keys, spot_key(spot)])
+
+
+def unfollow(key):
+    write_link([other for other in link_keys() if other != key])
+
+
+def spot_from_key(key, registry):
+    """What a key alone says about a spot, for one whose record this server
+    does not hold: the registry's entry, else the cell read off the key or
+    the station looked up in its table. None where the key says nothing."""
+    entry = registry.get(key)
+    cell, station = CELL_KEY.fullmatch(key), STATION_KEY.fullmatch(key)
+    if cell:
+        source = cell.group(1) or "era5"
+        if entry is None:
+            latitude, longitude = float(cell.group(2)), float(cell.group(3))
+            entry = {
+                "lat": latitude, "lon": longitude,
+                "name": f"{latitude:+.2f}, {longitude:+.2f}",
+                "zone": timezone_at(latitude, longitude),
+            }
+    elif station:
+        source = next(name for name, prefix in STATION_FILES.items()
+                      if prefix == station.group(1))
+        if entry is None:
+            try:
+                table = meteoswiss_stations() if source == "meteoswiss" else metar_stations()
+                row = table.loc[station.group(2)]
+            except Exception:
+                return None
+            entry = {
+                "lat": float(row["lat"]), "lon": float(row["lon"]), "name": str(row["name"]),
+                "station": station.group(2), "height": float(row["height"]),
+                "zone": timezone_at(float(row["lat"]), float(row["lon"])),
+            }
+    else:
+        return None
+    spot = {**entry, "source": source}
+    return {**spot, "path": spot_path(spot)}
+
+
+def my_locations(with_record=False):
+    """Your spots, in the order you added them: those on this server by
+    their file, the rest by what their key says. `with_record` keeps only
+    the ones whose record is here to count."""
+    on_disk = downloaded_locations()
+    registry = load_registry()
+    mine = {}
+    for key in link_keys():
+        entry = on_disk.get(key) or spot_from_key(key, registry)
+        if entry is not None and (entry["path"].exists() or not with_record):
+            mine[key] = entry
+    return mine
+
+
 def coords_label(latitude, longitude):
     """36.75°N · 8.25°W — how a sailor reads a position."""
     return (
@@ -1798,6 +1926,7 @@ st.session_state.setdefault("data_source", "era5")
 def enter_spot(spot):
     st.session_state["spot"] = spot
     remember_location(spot)
+    follow(spot)
 
 
 def fresh_click(result, seen_key):
@@ -1829,7 +1958,7 @@ def switch_source():
 
 
 if st.session_state["spot"] is None:
-    saved = downloaded_locations()
+    saved = my_locations()
     # The switches sit below the hero they rewrite, so read their values ahead.
     source = st.session_state.get("source_pick") or st.session_state["data_source"]
     by_water = st.session_state.get("by_water", True)
@@ -1888,7 +2017,7 @@ if st.session_state["spot"] is None:
             ("Hourly", "every day since"),
             ("25 km", "per grid cell"),
         ]
-    facts.append((len(saved), "spots downloaded"))
+    facts.append((len(saved), "spots in your list"))
 
     st.html(
         '<div class="landing">'
@@ -1989,7 +2118,7 @@ if st.session_state["spot"] is None:
             else:
                 hint = "Click anywhere on the water" + (" inside the outline" if source == "arome" else "")
             world.get_root().html.add_child(folium.Element(f'<div class="map-hint">{hint}</div>'))
-            # Everything already on disk, so the map doubles as your library.
+            # Your spots, so the map doubles as your library.
             for entry in saved.values():
                 dot_marker(entry["lat"], entry["lon"], spot_title(entry)).add_to(world)
             if clicked and not outside:
@@ -2028,7 +2157,7 @@ if st.session_state["spot"] is None:
             world.get_root().html.add_child(folium.Element(f'<div class="map-hint">{hint}</div>'))
             # The stations where the map looks, as it reported its view after
             # the last move; before it has, those nearest its centre. The ones
-            # you have downloaded stand out. They are a layer of their own, so
+            # on your list stand out. They are a layer of their own, so
             # a move swaps the dots without redrawing the map under them.
             view = (st.session_state.get(f"{source}_picker") or {}).get("bounds")
             near = (
@@ -2036,12 +2165,12 @@ if st.session_state["spot"] is None:
                 else stations.loc[km_from(*focus, stations["lat"], stations["lon"])
                                   .nsmallest(NEARBY_STATIONS).index]
             )
-            on_disk = {entry["station"] for entry in saved.values() if entry.get("source") == source}
+            mine = {entry["station"] for entry in saved.values() if entry.get("source") == source}
             dots = folium.FeatureGroup(name="stations")
             for abbr, row in near.iterrows():
                 if abbr != picked:
                     dot_marker(row["lat"], row["lon"], labels[abbr],
-                               idle=abbr not in on_disk).add_to(dots)
+                               idle=abbr not in mine).add_to(dots)
             if picked:
                 dot_marker(*focus, labels[picked], picked=True).add_to(dots)
 
@@ -2071,27 +2200,41 @@ if st.session_state["spot"] is None:
         with list_col:
             st.html(
                 '<div class="section-label">Your spots'
-                f"<small>{len(saved)} downloaded · hover to find on the map</small></div>"
+                f"<small>{len(saved)} in your link · hover to find on the map</small></div>"
             )
-            # Same height as the map, scrolling once the list outgrows it.
-            with st.container(height=LANDING_MAP_HEIGHT - 58, gap="xsmall"):
+            # Same height as the map, less the note below it, scrolling once
+            # the list outgrows it.
+            with st.container(height=LANDING_MAP_HEIGHT - 58 - LINK_NOTE_HEIGHT, gap="xsmall"):
                 for index, (key, entry) in enumerate(saved.items()):
-                    first, last = record_span(entry["path"], entry["path"].stat().st_mtime)
                     if entry.get("station"):
                         where = (f"{STATION_NAMES[entry['source']]} {entry['station']} · "
                                  f"{entry['height']:.0f} m")
                     else:
                         where = (f"{MODEL_NAMES[entry['source']]} · "
                                  f"{coords_label(entry['lat'], entry['lon'])}")
+                    if entry["path"].exists():
+                        first, last = record_span(entry["path"], entry["path"].stat().st_mtime)
+                        when = f"{first}–{last}"
+                    else:
+                        # The hosted app lost its downloads in a restart, or the
+                        # link was made on another copy of the app.
+                        when = "not on this server yet, Open fetches it"
                     # Keyed by position: the hover script below matches cards to
                     # spots by this number.
                     with st.container(key=f"spot_card_{index}", horizontal=True,
                                       vertical_alignment="center"):
-                        st.markdown(f"**{spot_title(entry)}**  \n:gray[{where} · {first}–{last}]")
+                        st.markdown(f"**{spot_title(entry)}**  \n:gray[{where} · {when}]")
                         if st.button("Open", key=f"open_{key}",
                                      icon=":material/arrow_forward:", width="content"):
                             enter_spot({k: v for k, v in entry.items() if k != "path"})
                             st.rerun()
+                        if st.button(":material/close:", key=f"drop_{key}", type="tertiary",
+                                     width="content",
+                                     help="Take this spot off your list. Its record stays "
+                                     "here for whoever else has it."):
+                            unfollow(key)
+                            st.rerun()
+            st.html(LINK_NOTE, unsafe_allow_javascript=True)
         spots = [
             {"lat": entry["lat"], "lon": entry["lon"], "name": spot_title(entry)}
             for entry in saved.values()
@@ -3742,7 +3885,7 @@ if st.session_state["mode"] == "explore":
 
     if "spots" in shown:
         st.divider()
-        spots = comparable(downloaded_locations())
+        spots = comparable(my_locations(with_record=True))
         kind = own_kind()[:-1] if kept("like_with_like", DEFAULT_LIKE_WITH_LIKE) else "spot"
         names = spot_names(spots)
         rows = []
@@ -3914,8 +4057,8 @@ def compare_card(name, credit, outlook, length, rank, tags):
 if st.session_state["mode"] == "window":
     st.html(ANSWER_CSS)
     activity = st.session_state["activity"]
-    spots = downloaded_locations()
-    # The spot you picked, by its key among the others on disk.
+    spots = my_locations(with_record=True)
+    # The spot you picked, by its key among your others with a record here.
     where = next((key for key, entry in spots.items() if entry["path"] == dataset_path), None)
     if where is None:
         where, spots = "here", {"here": {**spot, "path": dataset_path}, **spots}
