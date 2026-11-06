@@ -315,6 +315,37 @@ st.html(
     .link-note a { color: #8ecae6; font-weight: 600; text-decoration: none; }
     .link-note a:hover { color: #fb8500; }
 
+    /* A record on its way: the spot, what is coming, one bar, nothing to click.
+       The screen you came from stays on the page, faded but live, until the
+       run that downloads ends; while this screen is up, it is hidden instead. */
+    .st-key-loading_screen { max-width: 640px; margin: 4rem auto 0; }
+    body:has(.st-key-loading_screen) [data-stale="true"],
+    body:has(.st-key-loading_screen)
+        :is([data-testid="stVerticalBlockBorderWrapper"], [data-testid="stVerticalBlock"],
+            [data-testid="stHorizontalBlock"]):not(:has([data-stale="false"])) {
+        display: none !important;
+    }
+    .loading-eyebrow {
+        font-size: .7rem; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
+        color: #fb8500;
+    }
+    .loading-title {
+        font-size: clamp(1.6rem, 3vw, 2.3rem); font-weight: 800; letter-spacing: -.02em;
+        line-height: 1.1; color: #e8eef5; margin: .3rem 0 .6rem;
+    }
+    .loading-note { color: #8b98a5; font-size: .95rem; line-height: 1.5; }
+    .loading-bar {
+        position: relative; height: 6px; border-radius: 999px; background: #1b2631;
+        overflow: hidden; margin: 1.5rem 0 .6rem;
+    }
+    .loading-bar > i {
+        position: absolute; top: 0; bottom: 0; left: 0; width: 0; border-radius: 999px;
+        background: linear-gradient(90deg, #fb8500, #ffb703); transition: width .5s ease;
+    }
+    .loading-bar.unknown > i { width: 38%; animation: loadingSweep 1.5s ease-in-out infinite; }
+    @keyframes loadingSweep { from { left: -40%; } to { left: 100%; } }
+    .loading-text { font-size: .85rem; color: #8b98a5; }
+
     /* The map sits in its own rounded panel rather than running edge to edge. */
     iframe[title="streamlit_folium.st_folium"] {
         border-radius: 6px;
@@ -2340,32 +2371,35 @@ current_mode = st.session_state.get("mode")
 # What the map screen remembers about your last pick, cleared on the way back.
 LANDING_PICKS = ("clicked", "preset_applied", "station_pick", "station_find_applied",
                  "station_click_km", "station_clicks_seen")
-nav = topbar.container(horizontal=True, width="content", vertical_alignment="center",
-                       gap="small", key="nav")
+# No way out while a record downloads: a click would cut it short. The
+# loading screen offers the map itself where the download fails.
+if dataset_path.exists():
+    nav = topbar.container(horizontal=True, width="content", vertical_alignment="center",
+                           gap="small", key="nav")
 
-if nav.button(":material/arrow_back: Back", type="secondary"):
-    if current_mode is not None:
-        st.session_state["last_mode"] = current_mode
-        st.session_state["mode"] = None
-    else:
-        for key in ("spot", *LANDING_PICKS):
+    if nav.button(":material/arrow_back: Back", type="secondary"):
+        if current_mode is not None:
+            st.session_state["last_mode"] = current_mode
+            st.session_state["mode"] = None
+        else:
+            for key in ("spot", *LANDING_PICKS):
+                st.session_state.pop(key, None)
+        st.rerun()
+
+    forward_target = st.session_state.get("last_mode")
+    if nav.button(
+        ":material/arrow_forward: Forward",
+        type="secondary",
+        disabled=current_mode is not None or forward_target is None,
+    ):
+        st.session_state["mode"] = forward_target
+        st.session_state["rating_fresh"] = forward_target == "rating"
+        st.rerun()
+
+    if nav.button(":material/home: Start over", type="tertiary"):
+        for key in ("spot", "mode", "last_mode", *LANDING_PICKS):
             st.session_state.pop(key, None)
-    st.rerun()
-
-forward_target = st.session_state.get("last_mode")
-if nav.button(
-    ":material/arrow_forward: Forward",
-    type="secondary",
-    disabled=current_mode is not None or forward_target is None,
-):
-    st.session_state["mode"] = forward_target
-    st.session_state["rating_fresh"] = forward_target == "rating"
-    st.rerun()
-
-if nav.button(":material/home: Start over", type="tertiary"):
-    for key in ("spot", "mode", "last_mode", *LANDING_PICKS):
-        st.session_state.pop(key, None)
-    st.rerun()
+        st.rerun()
 
 
 # --- Stage 2: make sure this location has data ----------------------------
@@ -2373,70 +2407,83 @@ if nav.button(":material/home: Start over", type="tertiary"):
 # press; ERA5 waits for how far back you want, and for a Copernicus account.
 
 
-def fetch_now(fetch, what, clear=None):
-    """Run `fetch` straight away. Done, the app goes on to the spot; failed,
-    it says why and offers another go. `clear` tidies a progress bar away first."""
-    try:
-        fetch()
-    except Exception as error:
-        if clear:
-            clear()
-        st.error(f"Could not fetch that {what}: {error}")
-        st.button("Try again", icon=":material/refresh:")
-        st.stop()
+def back_to_map():
+    """Leave the spot for the map, as Back does from the start screen."""
+    for key in ("spot", "fetch_first", *LANDING_PICKS):
+        st.session_state.pop(key, None)
     st.rerun()
 
 
-def progress_bar(opening, unit):
-    """A bar that counts `unit`s as they land, and the report that moves it."""
-    bar = st.progress(0.0, text=opening)
+def loading_screen(note):
+    """The quiet screen a record arrives behind: the spot's name, what is
+    being fetched, one bar and nothing to click. Returns `show(fraction,
+    text)`, which fills the bar that far, or sweeps it while `fraction` is
+    None, and `clear`, which takes the bar away."""
+    with st.container(key="loading_screen"):
+        st.html(
+            '<div class="loading-eyebrow">Downloading the record</div>'
+            f'<div class="loading-title">{html.escape(LOCATION_NAME)}</div>'
+            f'<div class="loading-note">{note}</div>'
+        )
+        slot = st.empty()
 
-    def report(done, total):
-        bar.progress(
-            done / total,
-            text=f"Downloaded {done} of {total} {unit}" if done < total
-            else f"All {unit} in, joining them into one record...",
+    def show(fraction, text):
+        fill = "" if fraction is None else f' style="width:{fraction * 100:.0f}%"'
+        slot.html(
+            f'<div class="loading-bar{" unknown" if fraction is None else ""}"><i{fill}></i></div>'
+            f'<div class="loading-text">{html.escape(text)}</div>'
         )
 
-    return bar, report
+    return show, slot.empty
 
 
-if not dataset_path.exists() and STATION and spot["source"] == "metar":
-    st.subheader(f"Downloading the record for {LOCATION_NAME}")
-    st.caption(
-        f"METAR station {STATION} · {spot['height']:.0f} m · {LOCAL_TZ}. "
-        "Every report the airport has sent, from the Iowa Environmental Mesonet's "
-        "archive; no account needed. It can take a minute."
+def fetch_now(fetch, what, clear, hint=None):
+    """Run `fetch` straight away. Done, the app goes on to the spot; failed,
+    it takes the bar away, says why and offers another go, or the map."""
+    try:
+        fetch()
+    except Exception as error:
+        clear()
+        st.error(f"Could not fetch that {what}: {error}")
+        if hint:
+            st.caption(hint)
+        with st.container(horizontal=True):
+            st.button("Try again", icon=":material/refresh:", type="primary")
+            if st.button("Back to the map", icon=":material/arrow_back:"):
+                back_to_map()
+        st.stop()
+    st.session_state.pop("fetch_first", None)
+    st.rerun()
+
+
+def counting(show, unit):
+    """A report for the fetches that land `unit`s one by one, moving the bar."""
+    def report(done, total):
+        show(done / total, f"Downloaded {done} of {total} {unit}" if done < total
+             else f"All {unit} in, joining them into one record...")
+    return report
+
+
+def fetch_era5(spot, target, first):
+    """Every hour of ERA5 for a cell from `first` to today, prepared on
+    Copernicus' side: slow, and only with an account."""
+    client = cds_client()
+    download_path = data_dir / f"download_{spot['lat']:+.2f}_{spot['lon']:+.2f}.zip"
+    client.retrieve(
+        "reanalysis-era5-single-levels-timeseries",
+        {
+            "variable": ["10m_u_component_of_wind", "10m_v_component_of_wind", "2m_temperature"],
+            "location": {"latitude": spot["lat"], "longitude": spot["lon"]},
+            "date": [f"{first}/{date.today()}"],
+            "data_format": "netcdf",
+        },
+        str(download_path),
     )
-    with st.spinner("The Iowa Environmental Mesonet is gathering every report..."):
-        fetch_now(lambda: fetch_metar(spot, dataset_path), "airport")
+    unpack_download(download_path, target)
 
-if not dataset_path.exists() and STATION:
-    st.subheader(f"Downloading the record for {LOCATION_NAME}")
-    st.caption(
-        f"MeteoSwiss station {STATION} · {spot['height']:.0f} m · {LOCAL_TZ}. "
-        "Every hour the station has measured, from MeteoSwiss open data; "
-        "no account needed. It can take a minute or two."
-        + ("" if meteoswiss_stations()["has_temp"].get(STATION, True) else
-           " It measures no air temperature, so it borrows it from the nearest station "
-           "that does, corrected for the difference in height.")
-    )
-    bar, report = progress_bar("Asking MeteoSwiss for the station's files...", "files")
-    fetch_now(lambda: fetch_station(spot, dataset_path, progress=report), "station", bar.empty)
 
-if not dataset_path.exists() and SOURCE == "arome":
-    st.subheader(f"Downloading the record for {LOCATION_NAME}")
-    st.caption(
-        f"AROME HD cell {LATITUDE:+.2f}, {LONGITUDE:+.2f} · {LOCAL_TZ}. Every hour since "
-        f"{AROME_SINCE:%d %B %Y} of Météo-France's 1.5 km model, as Open-Meteo archives it; "
-        "no account needed, a year at a time. Mind that it is the first hours of each "
-        "forecast run stitched together, not a reanalysis, and only a few years of them: "
-        "one odd summer carries weight."
-    )
-    bar, report = progress_bar("Asking Open-Meteo for the first year...", "years")
-    fetch_now(lambda: fetch_arome(spot, dataset_path, progress=report), "cell", bar.empty)
-
-if not dataset_path.exists():
+if not dataset_path.exists() and SOURCE == "era5" and "fetch_first" not in st.session_state:
+    # The one download with a choice to make first, and an account to have.
     st.subheader(f"Download the record for {LOCATION_NAME}")
     st.caption(
         f"ERA5 cell {LATITUDE:+.2f}, {LONGITUDE:+.2f} · {LOCAL_TZ}. "
@@ -2453,35 +2500,55 @@ if not dataset_path.exists():
     first = date(1940, 1, 1) if years is None else date(date.today().year - years + 1, 1, 1)
 
     st.caption(f"Requesting {first} to {date.today()}.")
-    if st.button("Fetch from ERA5", type="primary"):
-        with st.spinner("Copernicus is preparing the data — this can take a while..."):
-            try:
-                client = cds_client()
-                download_path = data_dir / f"download_{LATITUDE:+.2f}_{LONGITUDE:+.2f}.zip"
-                client.retrieve(
-                    "reanalysis-era5-single-levels-timeseries",
-                    {
-                        "variable": [
-                            "10m_u_component_of_wind",
-                            "10m_v_component_of_wind",
-                            "2m_temperature",
-                        ],
-                        "location": {"latitude": LATITUDE, "longitude": LONGITUDE},
-                        "date": [f"{first}/{date.today()}"],
-                        "data_format": "netcdf",
-                    },
-                    str(download_path),
-                )
-                unpack_download(download_path, dataset_path)
-                st.success("Downloaded.")
-                st.rerun()
-            except Exception as error:
-                st.error(f"Could not fetch that location: {error}")
-                st.caption(
-                    "If this is the deployed app, add your Copernicus token "
-                    "under Settings → Secrets (see .streamlit/secrets.toml.example)."
-                )
+    with st.container(horizontal=True):
+        if st.button("Fetch from ERA5", type="primary"):
+            st.session_state["fetch_first"] = first
+            st.rerun()
+        if st.button("Back to the map", icon=":material/arrow_back:", type="tertiary"):
+            back_to_map()
     st.stop()
+
+if not dataset_path.exists():
+    # Nothing to press and nothing to click: the record lands behind one bar.
+    where = (f"{STATION_NAMES[SOURCE]} station {STATION} · {spot['height']:.0f} m" if STATION
+             else f"{MODEL_NAMES[SOURCE]} cell {LATITUDE:+.2f}, {LONGITUDE:+.2f}")
+    if SOURCE == "metar":
+        note = ("Every report the airport has sent, from the Iowa Environmental Mesonet's "
+                "archive; no account needed. It can take a minute.")
+    elif SOURCE == "meteoswiss":
+        note = ("Every hour the station has measured, from MeteoSwiss open data; "
+                "no account needed. It can take a minute or two."
+                + ("" if meteoswiss_stations()["has_temp"].get(STATION, True) else
+                   " It measures no air temperature, so it borrows it from the nearest "
+                   "station that does, corrected for the difference in height."))
+    elif SOURCE == "arome":
+        note = (f"Every hour since {AROME_SINCE:%d %B %Y} of Météo-France's 1.5 km model, "
+                "as Open-Meteo archives it; no account needed, a year at a time. Mind that "
+                "it is the first hours of each forecast run stitched together, not a "
+                "reanalysis, and only a few years of them: one odd summer carries weight.")
+    else:
+        first = st.session_state["fetch_first"]
+        note = (f"Every hour from {first:%d %B %Y} to today, prepared on Copernicus' side. "
+                "Nothing to do but wait: this can take a while.")
+    show, clear = loading_screen(f"{where} · {LOCAL_TZ}. {note}")
+    show(None, {
+        "metar": "The Iowa Environmental Mesonet is gathering every report...",
+        "meteoswiss": "Asking MeteoSwiss for the station's files...",
+        "arome": "Asking Open-Meteo for the first year...",
+        "era5": "Copernicus is preparing the data...",
+    }[SOURCE])
+    if SOURCE == "metar":
+        fetch_now(lambda: fetch_metar(spot, dataset_path), "airport", clear)
+    elif SOURCE == "meteoswiss":
+        fetch_now(lambda: fetch_station(spot, dataset_path, progress=counting(show, "files")),
+                  "station", clear)
+    elif SOURCE == "arome":
+        fetch_now(lambda: fetch_arome(spot, dataset_path, progress=counting(show, "years")),
+                  "cell", clear)
+    else:
+        fetch_now(lambda: fetch_era5(spot, dataset_path, first), "location", clear,
+                  hint="If this is the deployed app, add your Copernicus token under "
+                  "Settings → Secrets (see .streamlit/secrets.toml.example).")
 
 df = load_wind(dataset_path, dataset_path.stat().st_mtime, LOCAL_TZ)
 data_start = df.index.min().date()
