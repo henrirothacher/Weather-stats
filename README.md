@@ -7,6 +7,8 @@ day, and when, and at which of your spots, the wind you want turns up most.
 Built with Streamlit on three sources, picked on the start screen:
 
 - **ERA5** — ECMWF's reanalysis, hourly, 1940–present, 0.25° grid, anywhere.
+  A new spot brings its last twenty years the moment you arrive; every year
+  since 1940 follows on request, from Years in the filter.
 - **AROME HD** — Météo-France's 1.5 km model over western Europe
   (37.5–55.4°N, 12°W–16°E), hourly since 13 November 2022, as
   [Open-Meteo](https://open-meteo.com/) archives it (CC BY 4.0). The first

@@ -2131,8 +2131,8 @@ if st.session_state["spot"] is None:
         ]
     else:
         pitch = (
-            "Click any stretch of water and pull every hour of wind since 1940 "
-            "for that spot. "
+            "Click any stretch of water and pull twenty years of hourly wind for that "
+            "spot, and every year since 1940 if you ask. "
         )
         facts = [
             ("1940", "first year on record"),
@@ -2462,7 +2462,7 @@ dataset_path = spot_path(spot)
 current_mode = st.session_state.get("mode")
 # No way out while a record downloads: a click would cut it short. The
 # loading screen offers the map itself where the download fails.
-if dataset_path.exists():
+if dataset_path.exists() and "fetch_first" not in st.session_state:
     nav = topbar.container(horizontal=True, width="content", vertical_alignment="center",
                            gap="small", key="nav")
 
@@ -2528,7 +2528,9 @@ def loading_screen(note):
 
 def fetch_now(fetch, what, clear, hint=None):
     """Run `fetch` straight away. Done, the app goes on to the spot; failed,
-    it takes the bar away, says why and offers another go, or the map."""
+    it takes the bar away, says why and offers another go, or the map, or,
+    where a record is already in hand and more years were asked for, that
+    record as it is."""
     try:
         fetch()
     except Exception as error:
@@ -2538,7 +2540,11 @@ def fetch_now(fetch, what, clear, hint=None):
             st.caption(hint)
         with st.container(horizontal=True):
             st.button("Try again", icon=":material/refresh:", type="primary")
-            if st.button("Back to the map", icon=":material/arrow_back:"):
+            if dataset_path.exists():
+                if st.button("Keep the years you have", icon=":material/undo:"):
+                    st.session_state.pop("fetch_first", None)
+                    st.rerun()
+            elif st.button("Back to the map", icon=":material/arrow_back:"):
                 back_to_map()
         st.stop()
     st.session_state.pop("fetch_first", None)
@@ -2571,35 +2577,10 @@ def fetch_era5(spot, target, first):
     unpack_download(download_path, target)
 
 
-if not dataset_path.exists() and SOURCE == "era5" and "fetch_first" not in st.session_state:
-    # The one download with a choice to make first, and an account to have.
-    st.subheader(f"Download the record for {LOCATION_NAME}")
-    st.caption(
-        f"ERA5 cell {LATITUDE:+.2f}, {LONGITUDE:+.2f} · {LOCAL_TZ}. "
-        "A longer range takes longer to prepare on Copernicus' side."
-    )
-    span = pick(
-        st.segmented_control(
-            "How far back", ["10 years", "20 years", "50 years", "Everything (1940–)"],
-            default="20 years", key="span",
-        ),
-        "20 years",
-    )
-    years = {"10 years": 10, "20 years": 20, "50 years": 50}.get(span)
-    first = date(1940, 1, 1) if years is None else date(date.today().year - years + 1, 1, 1)
-
-    st.caption(f"Requesting {first} to {date.today()}.")
-    with st.container(horizontal=True):
-        if st.button("Fetch from ERA5", type="primary"):
-            st.session_state["fetch_first"] = first
-            st.rerun()
-        if st.button("Back to the map", icon=":material/arrow_back:", type="tertiary"):
-            back_to_map()
-    small_print()
-    st.stop()
-
-if not dataset_path.exists():
+if not dataset_path.exists() or "fetch_first" in st.session_state:
     # Nothing to press and nothing to click: the record lands behind one bar.
+    # ERA5 brings the last twenty years at first, and every year since 1940
+    # when asked from the filter, which sets `fetch_first` on a record in hand.
     where = (f"{STATION_NAMES[SOURCE]} station {STATION} · {spot['height']:.0f} m" if STATION
              else f"{MODEL_NAMES[SOURCE]} cell {LATITUDE:+.2f}, {LONGITUDE:+.2f}")
     if SOURCE == "metar":
@@ -2617,9 +2598,11 @@ if not dataset_path.exists():
                 "it is the first hours of each forecast run stitched together, not a "
                 "reanalysis, and only a few years of them: one odd summer carries weight.")
     else:
-        first = st.session_state["fetch_first"]
-        note = (f"Every hour from {first:%d %B %Y} to today, prepared on Copernicus' side. "
-                "Nothing to do but wait: this can take a while.")
+        first = st.session_state.get("fetch_first") or date(date.today().year - 19, 1, 1)
+        note = (f"Every hour from {first:%B %Y} to today, prepared on Copernicus' side; "
+                + ("every year since 1940 can follow later, from Years in the filter. "
+                   if first.year > 1940 else "")
+                + "Nothing to do but wait: this can take a while.")
     show, clear = loading_screen(f"{where} · {LOCAL_TZ}. {note}")
     show(None, {
         "metar": "The Iowa Environmental Mesonet is gathering every report...",
@@ -3541,6 +3524,14 @@ def settings(mode):
         side_dates("trip_dates", coming_dates(*TRIP_DAYS), YEAR_ROWS_UP_TO)
     remembered(side.segmented_control, "Years", list(LOOKBACK), required=True,
                key="years", default=DEFAULT_YEARS, start="default")
+    if SOURCE == "era5" and data_start.year > 1940:
+        # ERA5 came with its last twenty years; the rest is one click away.
+        if side.button("Every year since 1940", icon=":material/history:", type="tertiary",
+                       help=f"This record starts in {data_start.year}. Fetch the whole of "
+                       "it, 1940 to today, from Copernicus; that can take a while, and "
+                       "the app waits for it."):
+            st.session_state["fetch_first"] = date(1940, 1, 1)
+            st.rerun()
     if HAS_TEMP:
         side.subheader("Comfort")
         remembered(side.select_slider, "Feels like at least", FEELS_STEPS,
