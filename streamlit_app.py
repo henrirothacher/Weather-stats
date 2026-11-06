@@ -679,6 +679,9 @@ LOOKBACK = {"10 years": 10, "20 years": 20, "All": None}
 # Where explore and the trip planner start, before you change anything.
 DEFAULT_HOURS = (10, 17)
 DEFAULT_LASTING = 3
+# How far the wind may swing over those hours, in degrees, or any amount.
+SHIFT_STEPS = [*range(10, 181, 10), "Any"]
+DEFAULT_SHIFT = "Any"
 DEFAULT_YEARS = "20 years"
 # Stations beside stations and model cells beside model cells, unless you say otherwise.
 DEFAULT_LIKE_WITH_LIKE = True
@@ -2574,7 +2577,7 @@ def kit_for(celsius):
     return WETSUIT[-1][1]
 
 
-def what_to_expect(rating, activity, wind, lasting, session_text, missing_temp):
+def what_to_expect(rating, activity, wind, lasting, session_text, missing_temp, shift=None):
     """Turn the numbers into the sentences you would actually say out loud."""
     groove = rating["groove_pct"]
     low = wind[0]
@@ -2586,8 +2589,8 @@ def what_to_expect(rating, activity, wind, lasting, session_text, missing_temp):
     )
     lines = [
         f"For **{activity.lower()}** this is **{verdict}**. Your wind "
-        f"({wind_words(wind)}) holds {lasting} h in a row on **{groove:.0f}% of days** "
-        f"during {session_text}.",
+        f"({wind_words(wind)}) holds {lasting} h in a row{shift_words(shift)} on "
+        f"**{groove:.0f}% of days** during {session_text}.",
         f"Best odds in **{calendar.month_name[rating['best_month']]}** "
         f"({rating['best_month_pct']:.0f}% of days); thinnest in "
         f"**{calendar.month_name[rating['quiet_month']]}**.",
@@ -2613,11 +2616,12 @@ def what_to_expect(rating, activity, wind, lasting, session_text, missing_temp):
 
 
 @st.cache_data(show_spinner=False)
-def rate_location(path, mtime, zone, years_back, activity, wind, lasting, hours):
+def rate_location(path, mtime, zone, years_back, activity, wind, lasting, hours, shift=None):
     """Score a spot for one activity, over its own last `years_back` years
     and your hours on the water. A day counts as it does in explore and the
-    trip planner: your wind holds `lasting` hours in a row. The weights are
-    a judgement call — the four parts are shown so you can disagree."""
+    trip planner: your wind holds `lasting` hours in a row, swinging no more
+    than `shift` degrees. The weights are a judgement call — the four parts
+    are shown so you can disagree."""
     frame = load_wind(path, mtime, zone)
     first_year = lookback_start(frame, years_back)
     usable = frame[frame.index.year >= first_year]
@@ -2632,7 +2636,7 @@ def rate_location(path, mtime, zone, years_back, activity, wind, lasting, hours)
     by_day = knots.resample("1D")
     spread = (by_day.std() / by_day.mean()).dropna()
 
-    good = good_days(path, mtime, zone, years_back, wind, lasting, hours)
+    good = good_days(path, mtime, zone, years_back, wind, lasting, hours, shift)
     groove = good.mean() * 100
     too_light = (by_day.max().dropna() < low).mean() * 100
     big = (by_day.max().dropna() >= strong).mean() * 100
@@ -2646,7 +2650,8 @@ def rate_location(path, mtime, zone, years_back, activity, wind, lasting, hours)
     parts = {
         "Days with your wind": (
             min(groove / 6, 10),
-            f"{groove:.0f}% of days hold {wind_words(wind)} for {lasting} h in a row",
+            f"{groove:.0f}% of days hold {wind_words(wind)} for {lasting} h in a row"
+            f"{shift_words(shift)}",
         ),
         "Season length": (
             good_months / 12 * 10,
@@ -2699,8 +2704,40 @@ def rate_location(path, mtime, zone, years_back, activity, wind, lasting, hours)
     }
 
 
-def lasting_days(flags, length):
-    """Per day: do the flagged hours run unbroken for at least `length` hours?"""
+def shift_degrees(choice):
+    """The most the wind may swing, as the filter keeps it: degrees, or None for any."""
+    return None if choice == "Any" else int(choice)
+
+
+def shift_label(choice):
+    return "Any" if choice == "Any" else f"{choice}°"
+
+
+def shift_words(shift):
+    """', shifting at most 30°', or nothing where the wind may swing as it likes."""
+    return "" if shift is None else f", shifting at most {shift}°"
+
+
+def circular_spread(degrees, length):
+    """For each hour, the narrowest arc that holds the directions of the
+    `length` hours ending there, in degrees: 0 for a wind that never moved,
+    180 for one that turned right round. The first `length` - 1 hours have
+    no full window and read as not-a-number."""
+    values = np.asarray(degrees, dtype=np.float32) % 360
+    if len(values) < length:
+        return np.full(len(values), np.nan, dtype=np.float32)
+    windows = np.sort(np.lib.stride_tricks.sliding_window_view(values, length), axis=1)
+    # The gaps between neighbours round the compass, the last one wrapping
+    # back to the first: the arc that holds them all is what the widest gap leaves.
+    gaps = np.diff(windows, axis=1, append=windows[:, :1] + 360)
+    return np.concatenate([np.full(length - 1, np.nan, dtype=np.float32), 360 - gaps.max(axis=1)])
+
+
+def lasting_days(flags, length, direction=None, shift=None):
+    """Per day: do the flagged hours run unbroken for at least `length`
+    hours, with the wind swinging no more than `shift` degrees over those
+    very hours where a limit is set? `direction` is where the wind comes
+    from, hour by hour, aligned with `flags`."""
     stamps = flags.index.to_series()
     # The local calendar day, taken from wall-clock time: normalising the
     # zoned stamps fails where a clock change fell at midnight (Portugal 1976).
@@ -2711,8 +2748,13 @@ def lasting_days(flags, length):
         | day.to_series(index=flags.index).diff().ne(pd.Timedelta(0))
     )
     run = (fresh | ~flags).cumsum()
-    streak = flags.groupby(run).transform("sum")
-    return streak.where(flags, 0).groupby(day).max().ge(length)
+    # How many hours of the run end at this one: `length` or more, and the
+    # last `length` hours are all flagged, consecutive and on the same day.
+    held = flags.groupby(run).cumsum().ge(length)
+    if shift is not None:
+        # The same `length` hours, as the wind swung through them.
+        held &= pd.Series(circular_spread(direction, length) <= shift, index=flags.index)
+    return held.groupby(day).any()
 
 
 def flag_hours(frame, first_year, wind, dates):
@@ -2726,12 +2768,15 @@ def flag_hours(frame, first_year, wind, dates):
 
 
 @st.cache_data(show_spinner=False, max_entries=256)
-def good_days(path, mtime, zone, years_back, wind, lasting, hours):
+def good_days(path, mtime, zone, years_back, wind, lasting, hours, shift=None):
     """Per local day over a spot's own last `years_back` years: did your
-    hours on the water hold your wind `lasting` hours in a row?"""
+    hours on the water hold your wind `lasting` hours in a row, swinging
+    no more than `shift` degrees meanwhile?"""
     frame = load_wind(path, mtime, zone)
     frame, good = flag_hours(frame, lookback_start(frame, years_back), wind, None)
-    return lasting_days(good[hour_mask(frame.index, hours)], lasting)
+    on_water = hour_mask(frame.index, hours)
+    direction = wind_direction(frame["u10"], frame["v10"])[on_water].to_numpy()
+    return lasting_days(good[on_water], lasting, direction, shift)
 
 
 if "mode" not in st.session_state:
@@ -3266,7 +3311,8 @@ def wind_answer(activity):
 def hours_answer():
     start, end = kept("hours", DEFAULT_HOURS)
     when = "all day" if (start, end) == (0, 23) else f"{start:02d}:00–{end:02d}:59"
-    return f"{when}, {kept('lasting', DEFAULT_LASTING)} h in a row"
+    return (f"{when}, {kept('lasting', DEFAULT_LASTING)} h in a row"
+            f"{shift_words(shift_degrees(kept('shift', DEFAULT_SHIFT)))}")
 
 
 def wind_hint(activity):
@@ -3351,6 +3397,11 @@ def settings(mode):
     side.subheader("Your wind")
     remembered(side.slider, "Wind", 0, WIND_TOP, format="%d kn",
                key=f"wind_{activity}", default=ACTIVITIES[activity]["groove"])
+    remembered(side.select_slider, "May shift up to", SHIFT_STEPS, format_func=shift_label,
+               key="shift", default=DEFAULT_SHIFT,
+               help="Over your hours in a row, where the wind comes from stays within "
+               "this many degrees: 30° is a steady breeze, 90° takes in a sea breeze "
+               "swinging round. Any lets it back and veer as it likes.")
 
     side.subheader("Your time")
     hours = remembered(side.slider, "On the water", 0, 23, format="%d:00",
@@ -3846,6 +3897,7 @@ if st.session_state["mode"] == "explore":
     wind = tuple(kept(f"wind_{activity}", ACTIVITIES[activity]["groove"]))
     hours = tuple(kept("hours", DEFAULT_HOURS))
     lasting = kept("lasting", DEFAULT_LASTING)
+    shift = shift_degrees(kept("shift", DEFAULT_SHIFT))
     years_back = LOOKBACK[kept("years", DEFAULT_YEARS)]
 
     recent = df[df.index.year >= lookback_start(df, years_back)]
@@ -3854,7 +3906,7 @@ if st.session_state["mode"] == "explore":
     water = hour_mask(recent.index, hours)
     with st.spinner("Counting your days..."):
         days = good_days(dataset_path, dataset_path.stat().st_mtime, LOCAL_TZ,
-                         years_back, wind, lasting, hours)
+                         years_back, wind, lasting, hours, shift)
     years_text = f"{recent.index.min().year}–{recent.index.max().year}"
     hours_text = "all day" if hours == (0, 23) else f"{hours[0]:02d}:00–{hours[1]:02d}:59"
 
@@ -3877,8 +3929,8 @@ if st.session_state["mode"] == "explore":
     figures[0].metric(
         "Days with your wind", f"{days.mean() * 365:.0f} a year" if len(days) else "–",
         border=True, icon=":material/event_available:",
-        help=f"Days when {wind_words(wind)} holds {lasting} h in a row, {hours_text}, "
-        f"in {years_text}",
+        help=f"Days when {wind_words(wind)} holds {lasting} h in a row{shift_words(shift)}, "
+        f"{hours_text}, in {years_text}",
     )
     figures[1].metric(
         "Best month", calendar.month_name[best] if best else "–", border=True,
@@ -3966,7 +4018,7 @@ if st.session_state["mode"] == "explore":
             for key, entry in spots.items():
                 path = entry["path"]
                 found = good_days(path, path.stat().st_mtime, entry["zone"], years_back,
-                                  wind, lasting, hours)
+                                  wind, lasting, hours, shift)
                 rows.append((float(found.mean() * 100) if len(found) else 0.0,
                              names[key], path == dataset_path))
         rows.sort(reverse=True)
@@ -4036,16 +4088,18 @@ BANDS = {
 
 
 @st.cache_data(show_spinner=False, max_entries=128)
-def trip_outlook(path, mtime, zone, years_back, wind, lasting, hours, dates):
+def trip_outlook(path, mtime, zone, years_back, wind, lasting, hours, dates, shift=None):
     """What a spot's record says about your dates: per day whether your wind
-    held `lasting` hours in a row on the water, and over your hours on the
-    water how often it was too light, right or too strong, how hard it blew,
-    where it came from when it was right, and how warm the air was."""
+    held `lasting` hours in a row on the water, swinging no more than `shift`
+    degrees, and over your hours on the water how often it was too light,
+    right or too strong, how hard it blew, where it came from when it was
+    right, and how warm the air was."""
     frame = load_wind(path, mtime, zone)
     frame, good = flag_hours(frame, lookback_start(frame, years_back), wind, dates)
     on_water = hour_mask(frame.index, hours)
     knots = frame.loc[on_water, "speed"] * MS_TO_KNOTS
-    flags = lasting_days(good[on_water], lasting)
+    heading = wind_direction(frame["u10"], frame["v10"])
+    flags = lasting_days(good[on_water], lasting, heading[on_water].to_numpy(), shift)
     right = frame[good & on_water]
     air = frame.loc[on_water, "temp_c"].dropna() if "temp_c" in frame else pd.Series(dtype=float)
     return {
@@ -4174,6 +4228,7 @@ if st.session_state["mode"] == "window":
     wind = tuple(kept(f"wind_{activity}", ACTIVITIES[activity]["groove"]))
     hours = tuple(kept("hours", DEFAULT_HOURS))
     lasting = kept("lasting", DEFAULT_LASTING)
+    shift = shift_degrees(kept("shift", DEFAULT_SHIFT))
     years_back = LOOKBACK[kept("years", DEFAULT_YEARS)]
     within = (
         "at any hour" if hours == (0, 23)
@@ -4184,7 +4239,7 @@ if st.session_state["mode"] == "window":
         def outlook_at(key):
             path = spots[key]["path"]
             return trip_outlook(path, path.stat().st_mtime, spots[key]["zone"], years_back,
-                                wind, lasting, hours, dates)
+                                wind, lasting, hours, dates, shift)
 
         with st.spinner("Reading every year on record..."):
             outlook = outlook_at(where)
@@ -4376,13 +4431,14 @@ if st.session_state["mode"] == "rating":
     wind = tuple(kept(f"wind_{activity}", ACTIVITIES[activity]["groove"]))
     hours = tuple(kept("hours", DEFAULT_HOURS))
     lasting = kept("lasting", DEFAULT_LASTING)
+    shift = shift_degrees(kept("shift", DEFAULT_SHIFT))
     years_back = LOOKBACK[kept("years", DEFAULT_YEARS)]
     SESSION_TEXT = "all day" if hours == (0, 23) else f"{hours[0]:02d}:00–{hours[1]:02d}:59"
 
     with st.spinner("Counting your days..."):
         rating = rate_location(
             dataset_path, dataset_path.stat().st_mtime, LOCAL_TZ, years_back,
-            activity, wind, lasting, hours,
+            activity, wind, lasting, hours, shift,
         )
 
     fresh = st.session_state.pop("rating_fresh", False)
@@ -4415,8 +4471,8 @@ if st.session_state["mode"] == "rating":
         + "</div>"
     )
     st.caption(
-        f"Scored on {rating['years']}: {wind_words(wind)} for {lasting} h in a row, "
-        f"{SESSION_TEXT} local time. Data: {SOURCE_CREDIT}."
+        f"Scored on {rating['years']}: {wind_words(wind)} for {lasting} h in a row"
+        f"{shift_words(shift)}, {SESSION_TEXT} local time. Data: {SOURCE_CREDIT}."
     )
 
     expect_col, parts_col = st.columns([2, 3], gap="medium")
@@ -4426,7 +4482,7 @@ if st.session_state["mode"] == "rating":
             st.markdown("##### :material/lightbulb: What to expect")
             missing_temp = "No air temperature in this download."
             for line in what_to_expect(rating, activity, wind, lasting, SESSION_TEXT,
-                                       missing_temp):
+                                       missing_temp, shift):
                 st.markdown(line)
 
     with parts_col:
