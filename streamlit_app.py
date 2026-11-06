@@ -30,7 +30,7 @@ st.set_page_config(
 )
 
 # Goes up by 0.1 with every commit pushed to GitHub (2.9 -> 3.0).
-APP_VERSION = "2.9"
+APP_VERSION = "3.0"
 
 def svg_image(markup, view_box, css_class=""):
     """A drawing for st.html. Its sanitiser drops <svg> outright but lets an
@@ -345,6 +345,16 @@ st.html(
     .loading-bar.unknown > i { width: 38%; animation: loadingSweep 1.5s ease-in-out infinite; }
     @keyframes loadingSweep { from { left: -40%; } to { left: 100%; } }
     .loading-text { font-size: .85rem; color: #8b98a5; }
+
+    /* The small print at the bottom of every screen, clear of the version badge. */
+    .small-print {
+        margin: 3rem 0 2.5rem; padding: .9rem 4rem 0 0; border-top: 1px solid #26333f;
+        max-width: 980px; font-size: .74rem; line-height: 1.5; color: #6f7c89;
+    }
+    .small-print p { margin: 0 0 .45rem; }
+    .small-print b { color: #8b98a5; }
+    .small-print a { color: #8ecae6; text-decoration: none; }
+    .small-print a:hover { color: #fb8500; }
 
     /* The map sits in its own rounded panel rather than running edge to edge. */
     iframe[title="streamlit_folium.st_folium"] {
@@ -1237,7 +1247,29 @@ def source_credit(spot):
     """Where a spot's wind comes from, for the small print."""
     if spot.get("station"):
         return f"{STATION_NAMES[spot['source']]} station {spot['station']}"
-    return "AROME HD via Open-Meteo" if spot.get("source") == "arome" else "ERA5 reanalysis"
+    if spot.get("source") == "arome":
+        return "AROME HD via Open-Meteo, forecast runs stitched together, not a reanalysis"
+    return "ERA5 reanalysis"
+
+
+def small_print():
+    """The bottom of every screen: what this is and is not for, and the
+    credits the sources' licences ask for."""
+    st.html(
+        '<div class="small-print">'
+        "<p><b>For planning, not for navigation.</b> Wind Atlas sums up past records: "
+        "model estimates and station readings with gaps and errors of their own, shown "
+        "as their sources published them, and no forecast of any kind. Use it at your "
+        "own risk, and check the official forecasts and warnings before you go out. The "
+        "author accepts no liability for any loss or damage arising from its use.</p>"
+        f"<p>Contains modified Copernicus Climate Change Service information {date.today().year} "
+        "(ERA5); neither the European Commission nor ECMWF is responsible for any use "
+        'that may be made of it. <a href="https://open-meteo.com/">Weather data by '
+        "Open-Meteo.com</a> (AROME HD, CC BY 4.0): forecast runs stitched together, not a "
+        "reanalysis. MeteoSwiss open data (CC BY 4.0). METARs from the Iowa Environmental "
+        "Mesonet. Towns from GeoNames (CC BY 4.0), shores and waters from Natural Earth.</p>"
+        "</div>"
+    )
 
 
 def can_score(activity):
@@ -2037,7 +2069,9 @@ if st.session_state["spot"] is None:
         pitch = (
             "Click any water in western Europe and pull every hour since November "
             "2022 from Météo-France's AROME model at 1.5 km: lakes, bays and straits "
-            "get their own wind rather than a 25 km average. "
+            "get their own wind rather than a 25 km average. Not a reanalysis: the "
+            "first hours of each forecast run stitched together, and only a few years "
+            "of them, so one odd summer carries weight. "
         )
         facts = [
             ("1.5 km", "per grid cell"),
@@ -2353,6 +2387,7 @@ if st.session_state["spot"] is None:
                              type="primary", width="stretch"):
                     enter_spot({**station, "name": name})
                     st.rerun()
+    small_print()
     st.stop()
 
 
@@ -2512,6 +2547,7 @@ if not dataset_path.exists() and SOURCE == "era5" and "fetch_first" not in st.se
             st.rerun()
         if st.button("Back to the map", icon=":material/arrow_back:", type="tertiary"):
             back_to_map()
+    small_print()
     st.stop()
 
 if not dataset_path.exists():
@@ -3010,6 +3046,7 @@ if st.session_state["mode"] is None:
                 # The trip planner starts from its first question every time.
                 st.session_state["trip_step"] = 0
                 st.rerun()
+    small_print()
     st.stop()
 
 
@@ -3403,6 +3440,7 @@ def ask_in_turn(name, title, then, questions, ask, answer, hint):
                         st.rerun()
             else:
                 st.html(f'<div class="upcoming"><b>{question + 1}</b>{prompt}</div>')
+    small_print()
     st.stop()
 
 
@@ -4116,6 +4154,7 @@ if st.session_state["mode"] == "explore":
             else f"days-{LATITUDE:+.2f}_{LONGITUDE:+.2f}.csv",
             mime="text/csv", type="tertiary", icon=":material/download:",
         )
+    small_print()
     st.stop()
 
 
@@ -4466,6 +4505,7 @@ if st.session_state["mode"] == "window":
 
         st.divider()
         st.caption(f"Local time at each spot · data at {names[where]}: {source_credit(entry)}")
+    small_print()
     st.stop()
 
 
@@ -4602,4 +4642,5 @@ if st.session_state["mode"] == "rating":
             "through the day counts least. These weights are my choice — the four "
             "parts are shown above so you can weigh them yourself."
         )
+    small_print()
     st.stop()

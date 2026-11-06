@@ -36,6 +36,21 @@ Comparing spots keeps to one kind by default, stations with stations and
 model cells with model cells; a switch opens it to all, in explore's
 filter panel and in the trip planner's comparison.
 
+A day counts, in the rating, explore and the trip planner alike, when
+your wind holds for your hours in a row, the direction swings no more
+than you allow, and every hour feels at least as warm as you ask, wind
+chill counted (the Environment Canada and US National Weather Service
+index). The panel on the left, Filter, holds all of it.
+
+Small print: Wind Atlas is for planning, not for navigation. It sums up
+past records, model estimates and station readings with gaps and errors
+of their own, and forecasts nothing. Use it at your own risk and check
+the official forecasts and warnings before you go out; the author accepts
+no liability for any loss or damage arising from its use. ERA5 contains
+modified Copernicus Climate Change Service information, for which neither
+the European Commission nor ECMWF is responsible; the app says so at the
+bottom of every screen, with the credits the other sources ask for.
+
 ## Run locally
 
 ```bash
