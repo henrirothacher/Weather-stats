@@ -374,7 +374,7 @@ st.html(
     }
     [data-testid="stExpandSidebarButton"] span { color: #0b0f14 !important; }
     [data-testid="stExpandSidebarButton"]::after {
-        content: "Settings"; color: #0b0f14; font-weight: 700; font-size: .9rem;
+        content: "Filter"; color: #0b0f14; font-weight: 700; font-size: .9rem;
     }
     [data-testid="stExpandSidebarButton"]:hover { background: #ffb703 !important; }
     @keyframes settingsPulse {
@@ -2748,7 +2748,7 @@ CHOICES = [
     ("rating", "One number", "Rate this spot",
      "One score out of ten for what you sail.", "Rate it"),
     ("explore", "The whole picture", "Explore this spot",
-     "Windy days month by month and the wind rose, with more to switch on in the settings.",
+     "Windy days month by month and the wind rose, with more to switch on in the panel on the left.",
      "Explore"),
     ("window", "Your dates", "Plan a trip",
      "Off to a regatta or a week away? See what to expect on your dates, beside other spots.",
@@ -3335,18 +3335,24 @@ def side_dates(key, default, longest):
 
 
 def settings(mode):
-    """The sidebar inside a view: what you sail, then everything else the
-    view counts. Its widgets share their keys with the questions, so an
-    answer and its setting are one value. Returns what you sail."""
+    """The sidebar inside a view: what you sail, then the filter the view
+    counts days with, in two groups, the wind and the time. Its widgets
+    share their keys with the questions, so an answer and its setting are
+    one value. Returns what you sail."""
     side = st.sidebar
-    side.header("Settings")
+    side.header("Filter")
+    side.caption("A day counts when all of this holds at once, for your hours in a row.")
     activity = side.selectbox(
         "What you sail", list(ACTIVITIES),
         index=list(ACTIVITIES).index(st.session_state["activity"]), key="activity_side",
     )
     st.session_state["activity"] = activity
+
+    side.subheader("Your wind")
     remembered(side.slider, "Wind", 0, WIND_TOP, format="%d kn",
                key=f"wind_{activity}", default=ACTIVITIES[activity]["groove"])
+
+    side.subheader("Your time")
     hours = remembered(side.slider, "On the water", 0, 23, format="%d:00",
                        key="hours", default=DEFAULT_HOURS)
     side.caption("Every hour of the day" if hours == (0, 23)
@@ -3859,7 +3865,7 @@ if st.session_state["mode"] == "explore":
     )
     st.caption(
         f"{years_text} · your hours on the water {hours_text}, local time · "
-        f"data: {SOURCE_CREDIT} · more under Show more, in the settings on the left"
+        f"data: {SOURCE_CREDIT} · more under Show more, in the panel on the left"
     )
 
     # Four figures: how often, when in the year, when in the day, from where.
@@ -3975,7 +3981,7 @@ if st.session_state["mode"] == "explore":
         )
         if len(rows) < 2:
             st.info(f"No other {kind} downloaded yet to compare with. Pick one on the map, "
-                    "or compare with all spots under Compare, in the settings.")
+                    "or compare with all spots under Compare, in the panel on the left.")
         else:
             st.html('<div class="spots">' + "".join(
                 f'<div class="spot-row{" here" if here_spot else ""}" style="--r:{index}">'
@@ -4363,7 +4369,7 @@ if st.session_state["mode"] == "rating":
     if not can_score(activity):
         st.info(
             f"**{activity}** counts every day as sailable, so there is nothing to "
-            "score. Pick what you sail in the sidebar."
+            "score. Pick what you sail in the panel on the left."
         )
         st.stop()
     # The same settings explore and the trip planner count with.

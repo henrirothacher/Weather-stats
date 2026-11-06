@@ -34,7 +34,7 @@ Tangier".
 
 Comparing spots keeps to one kind by default, stations with stations and
 model cells with model cells; a switch opens it to all, in explore's
-settings and in the trip planner's comparison.
+filter panel and in the trip planner's comparison.
 
 ## Run locally
 
