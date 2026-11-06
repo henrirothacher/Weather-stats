@@ -315,6 +315,21 @@ st.html(
     .link-note a { color: #8ecae6; font-weight: 600; text-decoration: none; }
     .link-note a:hover { color: #fb8500; }
 
+    /* Your list at the right of the top bar on every screen, the navigation after it. */
+    .st-key-topbar [data-testid="stHorizontalBlock"] > :has(.st-key-list_chip) {
+        margin-left: auto; order: 10;
+    }
+    .st-key-topbar [data-testid="stHorizontalBlock"] > :has(.st-key-nav) { order: 20; }
+    .list-chip {
+        display: flex; align-items: center; gap: .4rem; white-space: nowrap;
+        font-size: .8rem; color: #8b98a5; padding: .32rem .85rem;
+        border: 1px solid #26333f; border-radius: 999px; background: #111922;
+    }
+    .list-chip b { color: #e8eef5; }
+    .list-chip a { color: #8ecae6; font-weight: 600; text-decoration: none; margin-left: .35rem; }
+    .list-chip a:hover { color: #fb8500; }
+    .st-key-list_chip button { border-radius: 999px; min-height: 2.15rem; font-size: .86rem; }
+
     /* A record on its way: the spot, what is coming, one bar, nothing to click.
        The screen you came from stays on the page, faded but live, until the
        run that downloads ends; while this screen is up, it is hidden instead. */
@@ -1341,12 +1356,16 @@ CELL_KEY = re.compile(r"(?:(arome)_)?([+-]\d+\.\d+)_([+-]\d+\.\d+)")
 STATION_KEY = re.compile(r"(station|metar)_(\w+)")
 
 LINK_NOTE_HEIGHT = 46
-LINK_NOTE = """
-<div class="link-note">Your spots live in this page's address. Bookmark it to keep
-them, send it to share them. <a href="#" id="copy-spot-link">Copy link</a></div>
+LINK_NOTE = (
+    '<div class="link-note">Your spots live in this page\'s address: bookmark it to keep '
+    "them, send it to share them. Copy link and Clear sit in the bar above.</div>"
+)
+
+# The copy link in the top bar: the address, spots and all, to the clipboard.
+COPY_LINK_SCRIPT = """
 <script>
 (() => {
-  const link = document.getElementById("copy-spot-link");
+  const link = document.getElementById("copy-list-link");
   if (!link) return;
   link.addEventListener("click", (event) => {
     event.preventDefault();
@@ -1360,6 +1379,10 @@ them, send it to share them. <a href="#" id="copy-spot-link">Copy link</a></div>
 })();
 </script>
 """
+
+# What the map screen remembers about your last pick, cleared on the way back.
+LANDING_PICKS = ("clicked", "preset_applied", "station_pick", "station_find_applied",
+                 "station_click_km", "station_clicks_seen")
 
 
 def link_token(key):
@@ -1451,6 +1474,31 @@ def my_locations(with_record=False):
         if entry is not None and (entry["path"].exists() or not with_record):
             mine[key] = entry
     return mine
+
+
+def draw_list_chip():
+    """Your list in the top bar of every screen: how many spots the address
+    carries, the link to copy, and Clear, which empties it and starts you
+    on the map as a newcomer would."""
+    count = len(link_keys())
+    with topbar.container(horizontal=True, vertical_alignment="center", gap="small",
+                          key="list_chip", width="content"):
+        if not count:
+            st.html('<div class="list-chip"><span>Your list</span><b>empty</b></div>')
+            return
+        st.html(
+            f'<div class="list-chip"><span>Your list</span><b>{count}</b>'
+            f'{"spot" if count == 1 else "spots"}'
+            '<a href="#" id="copy-list-link">Copy link</a></div>' + COPY_LINK_SCRIPT,
+            unsafe_allow_javascript=True,
+        )
+        if st.button("Clear", key="clear_list", type="tertiary", icon=":material/delete_sweep:",
+                     help="Empty your list and start on the map, as a newcomer would. "
+                     "The records stay on this server."):
+            write_link([])
+            for key in ("spot", "mode", "last_mode", "fetch_first", *LANDING_PICKS):
+                st.session_state.pop(key, None)
+            st.rerun()
 
 
 def coords_label(latitude, longitude):
@@ -1983,6 +2031,9 @@ def best_window(series_knots, length=3):
     return start, end, float(rolled.max()) if not rolled.empty else float("nan")
 
 
+draw_list_chip()
+
+
 # --- Stage 1: pick a spot on the map --------------------------------------
 
 if "spot" not in st.session_state:
@@ -2409,9 +2460,6 @@ dataset_path = spot_path(spot)
 # Back steps out of a view to the options, or off the options back to the map.
 # Forward returns to whichever view you last left.
 current_mode = st.session_state.get("mode")
-# What the map screen remembers about your last pick, cleared on the way back.
-LANDING_PICKS = ("clicked", "preset_applied", "station_pick", "station_find_applied",
-                 "station_click_km", "station_clicks_seen")
 # No way out while a record downloads: a click would cut it short. The
 # loading screen offers the map itself where the download fails.
 if dataset_path.exists():
