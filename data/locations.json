@@ -73,7 +73,7 @@
     "lat": 16.0,
     "lon": -61.0,
     "zone": "America/Guadeloupe",
-    "name": "62 km SE of Les Abymes, Guadeloupe"
+    "name": "Caribbean Sea, 48 km SE of Sainte-Anne"
   },
   "+14.75_-60.25": {
     "lat": 14.75,
@@ -101,5 +101,26 @@
     "lon": -87.25,
     "zone": "America/Chicago",
     "name": "Gulf of Mexico near Pensacola"
+  },
+  "arome_+43.86_+8.06": {
+    "lat": 43.86,
+    "lon": 8.06,
+    "source": "arome",
+    "zone": "Europe/Rome",
+    "name": "Ligurian Sea near Imperia"
+  },
+  "arome_+39.53_+2.64": {
+    "lat": 39.53,
+    "lon": 2.64,
+    "source": "arome",
+    "zone": "Europe/Madrid",
+    "name": "Balearic Sea near Palma"
+  },
+  "arome_+39.52_+2.64": {
+    "lat": 39.52,
+    "lon": 2.64,
+    "source": "arome",
+    "zone": "Europe/Madrid",
+    "name": "Balearic Sea near Palma"
   }
 }
