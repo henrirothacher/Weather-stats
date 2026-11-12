@@ -1,29 +1,29 @@
 [theme]
 base = "dark"
 
-# Deep near-black ground with a hint of blue, so the accents read as warm.
-backgroundColor = "#0a0e13"
-secondaryBackgroundColor = "#141c25"
-textColor = "#e8eef5"
-borderColor = "#26333f"
+# Deep ink ground with a hint of navy, so the teal and sky accents read cool and clear.
+backgroundColor = "#0a0d14"
+secondaryBackgroundColor = "#12161f"
+textColor = "#e7ebf3"
+borderColor = "#273043"
 
-primaryColor = "#fb8500"
-linkColor = "#8ecae6"
-codeBackgroundColor = "#111922"
+primaryColor = "#2dd4bf"
+linkColor = "#7dd3fc"
+codeBackgroundColor = "#10141c"
 
 # Semantic colours, tuned to sit on the dark ground.
-redColor = "#f4645c"
-orangeColor = "#fb8500"
-yellowColor = "#ffb703"
-greenColor = "#7bd88f"
-blueColor = "#8ecae6"
-violetColor = "#c77dff"
-grayColor = "#8b98a5"
+redColor = "#f43f5e"
+orangeColor = "#fb923c"
+yellowColor = "#fbbf24"
+greenColor = "#4ade80"
+blueColor = "#7dd3fc"
+violetColor = "#a78bfa"
+grayColor = "#8a94a8"
 
-# Charts: warm-to-cool spread that matches the wind bands.
-chartCategoricalColors = ["#fb8500", "#8ecae6", "#ffb703", "#219ebc", "#c77dff", "#7bd88f", "#f4645c"]
-chartSequentialColors = ["#0d1b26", "#123044", "#154763", "#166082", "#1279a1", "#2b93b8", "#5cadca", "#8ec6dc", "#c0deec", "#eaf5fb"]
+# Charts: teal first, then the sky, amber and rose of the wind bands.
+chartCategoricalColors = ["#2dd4bf", "#7dd3fc", "#fbbf24", "#a78bfa", "#fb7185", "#4ade80", "#f97316"]
+chartSequentialColors = ["#0c1a1f", "#0f2b31", "#0f3d43", "#0f5056", "#10646a", "#11787d", "#1b9a98", "#4bbcb2", "#8bd9cf", "#d2f5ef"]
 
-dataframeHeaderBackgroundColor = "#18222d"
+dataframeHeaderBackgroundColor = "#161b27"
 
 font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
