@@ -1726,21 +1726,6 @@ def dates_label(dates):
     return f"{first_day} {first} – {last_day} {last}"
 
 
-def as_dates(picked):
-    """The range from the date picker as a window, or None for a year or more.
-    With only the first end picked so far, that one day is the window."""
-    if not picked:
-        return None
-    start, end = picked[0], picked[-1]
-    if (end - start).days >= 365:
-        return None
-    # Not every year has a 29 Feb; the 28th stands in for it.
-    return tuple(
-        (2, 28) if (day.month, day.day) == (2, 29) else (day.month, day.day)
-        for day in (start, end)
-    )
-
-
 def lookback_start(frame, years_back):
     """First year of the last `years_back` years on record; None for all of them."""
     first, last = frame.index.min().year, frame.index.max().year
@@ -3081,43 +3066,24 @@ if st.session_state["mode"] is None:
     st.stop()
 
 
-# --- Questions, one at a time --------------------------------------------
-# The trip planner opens with a few questions: answered ones shrink to a
-# line you can reopen, the one you are on gets the room, the ones to come
-# wait greyed out, and the answer only once all are in. Then the sidebar
-# carries every answer, to change while you look. Explore goes straight to
-# its overview with the same settings in the sidebar, and the answers share
-# their keys, so one given in either view is already there in the other
-# and in the rating.
+# --- The filter and the trip's dates -------------------------------------
+# The trip planner asks one question, your dates; the rest of its filter is
+# in the sidebar, beside the answer, to change while you look. The rating
+# has the same sidebar, and the settings share their keys, so one given in
+# either view is already there in the other.
 
 COUNT_WORDS = ["No", "One", "Two", "Three", "Four", "Five"]
 # Where the trip's dates start before you pick: these days of next month.
 TRIP_DAYS = (10, 16)
-# A trip is at most this many days: drawn year by year, a dot a day.
+# A trip is at most this many days, as long as the calendar lets you pick:
+# drawn year by year, a dot a day.
 YEAR_ROWS_UP_TO = 62
 
 
 def coming_dates(first_day, last_day):
-    """Those days of next month: where a date picker starts."""
-    today = date.today()
-    coming = date(today.year + (today.month == 12), today.month % 12 + 1, 1)
-    return coming.replace(day=first_day), coming.replace(day=last_day)
-
-
-def ask_wind(activity):
-    """The range you would go out in, kept per sport."""
-    remembered(
-        st.slider, "Wind", 0, WIND_TOP, format="%d kn", label_visibility="collapsed",
-        key=f"wind_{activity}", default=ACTIVITIES[activity]["groove"],
-    )
-
-
-def ask_hours():
-    hours = remembered(
-        st.slider, "On the water", 0, 23, format="%d:00", label_visibility="collapsed",
-        key="hours", default=DEFAULT_HOURS,
-    )
-    ask_lasting(st, hours)
+    """Those days of next month, as a window: where the calendar starts."""
+    month = date.today().month % 12 + 1
+    return (month, first_day), (month, last_day)
 
 
 # How long your wind has to hold: a button for each of one to five hours,
@@ -3159,9 +3125,12 @@ def ask_lasting(place, hours):
 
 # The dates as a calendar you click: your first day, then your last, the
 # range following the pointer in between. A component of our own, as
-# Streamlit's date picker is a small field with a pop-up. It draws as many
-# months side by side as there is room for, and only builds them anew when
-# you turn the page: hovering and clicking just repaint the days.
+# Streamlit's date picker is a small field with a pop-up, and always has a
+# year. This one has none: every year on record is read on the same days,
+# so it shows twelve months that run on from December into January, with
+# no years and no weekdays, which change from year to year. It draws as
+# many months side by side as there is room for, and only builds them anew
+# when you turn the page: hovering and clicking just repaint the days.
 CALENDAR_CSS = """
 .cal { --orange: #2dd4bf; color: #e7ebf3; font-variant-numeric: tabular-nums; }
 .cal-top { display: flex; align-items: center; gap: .8rem; margin-bottom: 1rem; }
@@ -3177,18 +3146,12 @@ CALENDAR_CSS = """
     border: 1px solid #273043; border-radius: 50%; background: #0f131b; color: #e7ebf3;
     cursor: pointer; transition: border-color .2s ease, background .2s ease;
 }
-.nav:hover:not(:disabled) { border-color: var(--orange); background: #161b26; }
-.nav:disabled { opacity: .3; cursor: default; }
+.nav:hover { border-color: var(--orange); background: #161b26; }
 .nav svg { width: 1.1rem; height: 1.1rem; }
 .months { display: grid; grid-template-columns: repeat(var(--count), minmax(0, 1fr)); gap: 1.6rem; }
 .month { min-width: 0; }
 .month-name { margin: 0 0 .6rem .2rem; font-size: 1.05rem; font-weight: 800; letter-spacing: -.01em; }
-.month-name small { margin-left: .3rem; font-size: .8rem; font-weight: 600; color: #5b6478; }
-.dow, .days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
-.dow span {
-    padding-bottom: .4rem; text-align: center; font-size: .66rem; font-weight: 700;
-    letter-spacing: .08em; text-transform: uppercase; color: #5b6478;
-}
+.days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
 .day {
     position: relative; height: 2.75rem; padding: 0; border: 0; background: none;
     color: inherit; font: inherit; font-size: .92rem; cursor: pointer;
@@ -3199,13 +3162,10 @@ CALENDAR_CSS = """
     transition: background .15s ease, color .15s ease, box-shadow .15s ease;
 }
 .day:hover span { box-shadow: inset 0 0 0 1.5px var(--orange); }
-.day.weekend { color: #c3cbda; }
 .day.today span::after {
     content: ""; position: absolute; bottom: .3rem; left: 50%; width: 4px; height: 4px;
     margin-left: -2px; border-radius: 50%; background: #7dd3fc;
 }
-.day:disabled { color: #2a3344; cursor: default; }
-.day:disabled span { box-shadow: none; }
 /* The range as one band across each week, ends rounded at the picked days. */
 .day.in::before {
     content: ""; position: absolute; inset: .2rem 0; background: rgba(45, 212, 191, .17);
@@ -3221,34 +3181,40 @@ CALENDAR_CSS = """
 .day.far::before { background: rgba(138, 148, 168, .12) !important; }
 .day.far span { background: none !important; color: #5b6478 !important; }
 .cal-hint { margin-top: .9rem; text-align: center; font-size: .82rem; color: #8a94a8; }
-@keyframes rise { from { opacity: 0; transform: translateY(10px); } }
 @keyframes slideFrom { from { opacity: 0; transform: translateX(var(--from)); } }
-.months.enter .month { animation: rise .5s cubic-bezier(.2, .7, .3, 1) both; }
-.months.enter .month:nth-child(2) { animation-delay: .08s; }
-.months.enter .month:nth-child(3) { animation-delay: .16s; }
 .months.turn .month { animation: slideFrom .35s cubic-bezier(.2, .7, .3, 1) both; }
-@media (prefers-reduced-motion: reduce) { .month { animation: none !important; } }
 """
 
 CALENDAR_JS = """
-const DAY = 86400000;
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July",
                 "August", "September", "October", "November", "December"];
 const SHORT = MONTHS.map((name) => name.slice(0, 3));
+// A year of no year in particular: 365 days, February with 28.
+const YEAR = 365;
+const LENGTHS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+const FIRSTS = LENGTHS.map((_, m) => LENGTHS.slice(0, m).reduce((a, b) => a + b, 0));
 const ARROW = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
   stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg>`;
-const parse = (text) => { const [y, m, d] = text.split("-").map(Number); return Date.UTC(y, m - 1, d); };
-const iso = (t) => new Date(t).toISOString().slice(0, 10);
-const monthOf = (t) => { const d = new Date(t); return d.getUTCFullYear() * 12 + d.getUTCMonth(); };
-const said = (t) => { const d = new Date(t); return `${d.getUTCDate()} ${SHORT[d.getUTCMonth()]}`; };
-const span = (a, b) => Math.round(Math.abs(b - a) / DAY) + 1;
+// A day is its place in that year, 0 for 1 January; "MM-DD" to and from Python.
+const parse = (text) => {
+  const [m, d] = text.split("-").map(Number);
+  return FIRSTS[m - 1] + Math.min(d, LENGTHS[m - 1]) - 1;
+};
+const monthOf = (t) => FIRSTS.findLastIndex((first) => first <= t);
+const dayOf = (t) => t - FIRSTS[monthOf(t)] + 1;
+const text = (t) => `${String(monthOf(t) + 1).padStart(2, "0")}-${String(dayOf(t)).padStart(2, "0")}`;
+const said = (t) => `${dayOf(t)} ${SHORT[monthOf(t)]}`;
+// Days from a on to b, both counted, running on past New Year.
+const ahead = (a, b) => ((b - a) % YEAR + YEAR) % YEAR + 1;
+// Two days as a range the shorter way round: its first day and its length.
+const between = (a, b) => ahead(a, b) <= ahead(b, a) ? [a, ahead(a, b)] : [b, ahead(b, a)];
 
 export default function (component) {
   const { data, setStateValue, parentElement } = component;
   const root = parentElement.querySelector(".cal");
   let s = root.__state;
   if (!s) {
-    s = root.__state = { pending: null, hover: null, view: null, sent: null, built: null };
+    s = root.__state = { pending: null, hover: null, view: null, sent: null };
     root.innerHTML = `<div class="cal-top">
         <button class="nav prev" aria-label="Earlier months">${ARROW("M15 5l-7 7 7 7")}</button>
         <div class="cal-summary" aria-live="polite"><b></b><span></span></div>
@@ -3258,33 +3224,33 @@ export default function (component) {
     root.addEventListener("click", (event) => {
       const nav = event.target.closest(".nav");
       if (nav) {
+        // December turns on to January, and back.
         const step = nav.classList.contains("next") ? 1 : -1;
-        s.view += step;
+        s.view = (s.view + step + 12) % 12;
         build(step > 0 ? "28px" : "-28px");
         return;
       }
       const day = event.target.closest(".day");
-      if (!day || day.disabled) return;
+      if (!day) return;
       const t = Number(day.dataset.t);
-      if (s.pending === null) {
-        s.pending = t;
-        s.hover = t;
-      } else if (span(s.pending, t) > s.data.longest) {
-        // Too long to be a trip: start again from here.
+      const [start, days] = s.pending === null ? [t, 1] : between(s.pending, t);
+      if (s.pending === null || days > s.data.longest) {
+        // A first day, or too long to be a trip: start again from here.
         s.pending = t;
         s.hover = t;
       } else {
-        s.start = Math.min(s.pending, t);
-        s.end = Math.max(s.pending, t);
+        s.start = start;
+        s.days = days;
         s.pending = null;
-        s.sent = `${iso(s.start)}|${iso(s.end)}`;
-        s.send("range", { start: iso(s.start), end: iso(s.end) });
+        const range = { start: text(start), end: text((start + days - 1) % YEAR) };
+        s.sent = `${range.start}|${range.end}`;
+        s.send("range", range);
       }
       paint();
     });
     root.addEventListener("mouseover", (event) => {
       const day = event.target.closest(".day");
-      if (s.pending === null || !day || day.disabled) return;
+      if (s.pending === null || !day) return;
       s.hover = Number(day.dataset.t);
       paint();
     });
@@ -3297,8 +3263,6 @@ export default function (component) {
   }
   s.data = data;
   s.send = setStateValue;
-  s.low = parse(data.min);
-  s.high = parse(data.max);
   s.today = parse(data.today);
   // Take what Python holds, unless a pick is half made.
   const held = `${data.start}|${data.end}`;
@@ -3306,12 +3270,12 @@ export default function (component) {
     s.sent = held;
     if (s.pending === null) {
       s.start = parse(data.start);
-      s.end = parse(data.end);
+      s.days = ahead(s.start, parse(data.end));
       s.view = null;
     }
   }
   if (s.view === null) s.view = monthOf(s.start);
-  build(s.built === null ? "enter" : null);
+  build(null);
 
   function count() {
     const width = root.getBoundingClientRect().width || 900;
@@ -3320,55 +3284,44 @@ export default function (component) {
 
   function build(motion) {
     s.count = count();
-    s.view = Math.max(monthOf(s.low), Math.min(s.view, monthOf(s.high) - s.count + 1));
     const months = root.querySelector(".months");
     months.style.setProperty("--count", s.count);
     let markup = "";
     for (let m = s.view; m < s.view + s.count; m++) {
-      const year = Math.floor(m / 12), month = m % 12;
-      const first = Date.UTC(year, month, 1);
-      const length = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
-      const offset = (new Date(first).getUTCDay() + 6) % 7;
-      let cells = "<span></span>".repeat(offset);
+      const month = m % 12, length = LENGTHS[month];
+      let cells = "";
+      // Rows of seven from the 1st, with no weekdays above them.
       for (let d = 1; d <= length; d++) {
-        const t = first + (d - 1) * DAY;
-        const weekday = (offset + d - 1) % 7;
+        const t = FIRSTS[month] + d - 1;
         const kinds = ["day"];
-        if (weekday >= 5) kinds.push("weekend");
-        if (weekday === 0 || d === 1) kinds.push("rs");
-        if (weekday === 6 || d === length) kinds.push("re");
+        if (d % 7 === 1) kinds.push("rs");
+        if (d % 7 === 0 || d === length) kinds.push("re");
         if (t === s.today) kinds.push("today");
-        const off = t < s.low || t > s.high;
-        cells += `<button class="${kinds.join(" ")}" data-t="${t}" ${off ? "disabled" : ""}
-          aria-label="${d} ${MONTHS[month]} ${year}"><span>${d}</span></button>`;
+        cells += `<button class="${kinds.join(" ")}" data-t="${t}"
+          aria-label="${d} ${MONTHS[month]}"><span>${d}</span></button>`;
       }
-      markup += `<div class="month"><div class="month-name">${MONTHS[month]}<small>${year}</small></div>
-        <div class="dow">${["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((n) => `<span>${n}</span>`).join("")}</div>
+      markup += `<div class="month"><div class="month-name">${MONTHS[month]}</div>
         <div class="days">${cells}</div></div>`;
     }
     months.innerHTML = markup;
-    months.classList.remove("enter", "turn");
+    months.classList.remove("turn");
     if (motion) {
       void months.offsetWidth;
-      if (motion === "enter") months.classList.add("enter");
-      else { months.classList.add("turn"); months.style.setProperty("--from", motion); }
+      months.classList.add("turn");
+      months.style.setProperty("--from", motion);
     }
-    s.built = s.view;
-    root.querySelector(".prev").disabled = s.view <= monthOf(s.low);
-    root.querySelector(".next").disabled = s.view + s.count - 1 >= monthOf(s.high);
     paint();
   }
 
   function paint() {
     const picking = s.pending !== null;
-    const lo = picking ? Math.min(s.pending, s.hover) : s.start;
-    const hi = picking ? Math.max(s.pending, s.hover) : s.end;
-    const days = span(lo, hi);
+    const [lo, days] = picking ? between(s.pending, s.hover) : [s.start, s.days];
+    const hi = (lo + days - 1) % YEAR;
     const far = picking && days > s.data.longest;
     root.classList.toggle("picking", picking);
     for (const day of root.querySelectorAll(".day")) {
       const t = Number(day.dataset.t);
-      const inside = t >= lo && t <= hi;
+      const inside = ahead(lo, t) <= days;
       day.classList.toggle("in", inside);
       day.classList.toggle("lo", t === lo);
       day.classList.toggle("hi", t === hi);
@@ -3376,10 +3329,10 @@ export default function (component) {
     }
     const summary = root.querySelector(".cal-summary");
     summary.classList.toggle("far", far);
-    summary.querySelector("b").textContent = lo === hi ? said(lo) : `${said(lo)} → ${said(hi)}`;
+    summary.querySelector("b").textContent = days === 1 ? said(lo) : `${said(lo)} → ${said(hi)}`;
     summary.querySelector("span").textContent = far
       ? `Up to ${s.data.longest} days: pick a nearer last day`
-      : picking && lo === hi ? "Now click your last day"
+      : picking && days === 1 ? "Now click your last day"
       : `${days} day${days === 1 ? "" : "s"}`;
   }
 }
@@ -3391,104 +3344,44 @@ calendar_picker = st.components.v2.component(
 
 
 def ask_dates(key, default, longest=365):
-    """A range of days on the calendar, at most `longest` long, kept under
-    `key` as (first, last). The calendar's own state only lives while it is
-    drawn, so it starts from the kept range each time it comes back."""
+    """A window of days on the calendar, at most `longest` long, kept under
+    `key`. The calendar's own state only lives while it is drawn, so it
+    starts from the kept window each time it comes back."""
+    def sent(day):
+        return f"{day[0]:02d}-{day[1]:02d}"
+
     held = kept(key, default)
-    first, last = held[0], held[-1]
     today = date.today()
     result = calendar_picker(
         key=f"{key}_calendar",
-        data={
-            "start": first.isoformat(), "end": last.isoformat(), "longest": longest,
-            "min": date(today.year, 1, 1).isoformat(),
-            "max": date(today.year + 1, 12, 31).isoformat(), "today": today.isoformat(),
-        },
+        data={"start": sent(held[0]), "end": sent(held[1]), "longest": longest,
+              "today": sent((today.month, today.day))},
         on_range_change=lambda: None,
     )
     picked = (result or {}).get("range")
     if picked:
-        first, last = date.fromisoformat(picked["start"]), date.fromisoformat(picked["end"])
-    st.session_state[f"kept_{key}"] = (first, last)
-    return first, last
+        held = tuple(tuple(int(part) for part in picked[end].split("-")) for end in ("start", "end"))
+    st.session_state[f"kept_{key}"] = held
+    return held
 
 
-def wind_answer(activity):
-    return wind_words(kept(f"wind_{activity}", ACTIVITIES[activity]["groove"]))
-
-
-def hours_answer():
-    start, end = kept("hours", DEFAULT_HOURS)
-    when = "all day" if (start, end) == (0, 23) else f"{start:02d}:00–{end:02d}:59"
-    limits = rule_words(shift_degrees(kept("shift", DEFAULT_SHIFT)),
-                        feels_degrees(kept("feels", DEFAULT_FEELS)) if HAS_TEMP else None)
-    return f"{when}, {kept('lasting', DEFAULT_LASTING)} h in a row{limits}"
-
-
-def wind_hint(activity):
-    low, high = ACTIVITIES[activity]["groove"]
-    return f"{activity} counts {low}–{high} kt as worth going out." if can_score(activity) else ""
-
-
-HOURS_HINT = "A day counts when your wind holds this long without a break, inside these hours."
-
-
-def ask_in_turn(name, title, then, questions, ask, answer, hint):
-    """Draw `questions` one at a time and stop the run until all are in.
-    `ask(question)` draws its widgets and returns False while the answer
-    will not do; `answer(question)` says a kept one in a few words."""
-    asked = len(questions)
-    step = st.session_state.setdefault(f"{name}_step", 0)
-    if step >= asked:
+def ask_trip_dates(title, default):
+    """The trip planner's one question, your dates: the run stops here until
+    Show me, and Change dates in the filter comes back to it."""
+    if st.session_state.setdefault("trip_step", 0):
         return
-
-    with st.container(key=f"{name}_page"):
-        st.html(
-            f'<div class="view-title reveal">{reveal(title)}</div>'
-            f'<div class="view-sub">{COUNT_WORDS[asked]} questions, then {then}.</div>'
-        )
-        for question, (label, prompt) in enumerate(questions):
-            if question < step:
-                with st.container(horizontal=True, vertical_alignment="center",
-                                  key=f"{name}_asked_{question}"):
-                    st.html(
-                        f'<div class="answered"><b>✓</b><span>{label}</span>'
-                        f"<strong>{html.escape(answer(question))}</strong></div>"
-                    )
-                    if st.button("Change", key=f"{name}_change_{question}", type="tertiary"):
-                        st.session_state[f"{name}_step"] = question
-                        st.rerun()
-            elif question == step:
-                with st.container(key="asking"):
-                    st.html(f'<div class="asking"><b>{question + 1}</b>{prompt}</div>')
-                    usable = ask(question) is not False
-                    if hint(question):
-                        st.caption(hint(question))
-                    if st.button("Show me" if question == asked - 1 else "Next",
-                                 type="primary", icon=":material/arrow_forward:",
-                                 key=f"{name}_next", disabled=not usable):
-                        st.session_state[f"{name}_step"] = question + 1
-                        st.rerun()
-            else:
-                st.html(f'<div class="upcoming"><b>{question + 1}</b>{prompt}</div>')
+    with st.container(key="trip_page"):
+        st.html(f'<div class="view-title">{title}</div>')
+        with st.container(key="asking"):
+            st.html('<div class="asking">When are you there?</div>')
+            ask_dates("trip_dates", default, YEAR_ROWS_UP_TO)
+            st.caption(DATES_HINT)
+            if st.button("Show me", type="primary", icon=":material/arrow_forward:",
+                         key="trip_next"):
+                st.session_state["trip_step"] = 1
+                st.rerun()
     small_print()
     st.stop()
-
-
-def side_dates(key, default, longest):
-    """The range ask_dates keeps under `key`, as a date field for the
-    sidebar, where the calendar has no room. A range half picked, or longer
-    than `longest` days, leaves the kept one as it was."""
-    today = date.today()
-    picked = st.sidebar.date_input(
-        "Dates", value=kept(key, default), format="DD.MM.YYYY", key=f"{key}_field",
-        min_value=date(today.year, 1, 1), max_value=date(today.year + 1, 12, 31),
-        help="Only the day and month count: every year on record is checked on these dates.",
-    )
-    if len(picked) == 2 and (picked[1] - picked[0]).days < longest:
-        st.session_state[f"kept_{key}"] = tuple(picked)
-    elif len(picked) == 2:
-        st.sidebar.warning(f"Up to {longest} days: pick a nearer last day.")
 
 
 def settings(mode):
@@ -3521,7 +3414,12 @@ def settings(mode):
                  else f"{hours[0]:02d}:00–{hours[1]:02d}:59 local time")
     ask_lasting(side, hours)
     if mode == "window":
-        side_dates("trip_dates", coming_dates(*TRIP_DAYS), YEAR_ROWS_UP_TO)
+        # The calendar has no room here: your dates, and the way back to it.
+        side.markdown(f"Dates: **{dates_label(kept('trip_dates', coming_dates(*TRIP_DAYS)))}**")
+        if side.button("Change dates", key="trip_redate", icon=":material/edit_calendar:",
+                       type="tertiary"):
+            st.session_state["trip_step"] = 0
+            st.rerun()
     remembered(side.segmented_control, "Years", list(LOOKBACK), required=True,
                key="years", default=DEFAULT_YEARS, start="default")
     if SOURCE == "era5" and data_start.year > 1940:
@@ -4197,18 +4095,20 @@ if st.session_state["mode"] == "explore":
     st.stop()
 
 
-# --- Plan a trip: three questions, then what to expect ---------------------
-# Your spot on set dates, a regatta or a week away: when, the wind you need
-# and your hours on the water, one at a time. Where is the spot you picked.
-# Then what those dates have brought in the years on record, built up a
-# piece at a time, and the same dates at your other spots side by side,
-# should this one disappoint.
+# --- Plan a trip: your dates, then what to expect --------------------------
+# Your spot on set dates, a regatta or a week away: you pick the days, and
+# the wind you need and your hours on the water come from the filter on the
+# left. Where is the spot you picked. Then what those dates have brought in
+# the years on record, and the same dates at up to three of your other
+# spots side by side, should this one disappoint.
 
-TRIP_QUESTIONS = [
-    ("When", "When are you there?"),
-    ("Wind", "How much wind do you need?"),
-    ("On the water", "When are you on the water?"),
-]
+DATES_HINT = ("Every year on record is checked on these days. Wind and hours on the water "
+              "are set in the filter.")
+# How many of your other spots a trip sets beside yours: one row of cards.
+COMPARE_UP_TO = 3
+COMPARE_MAP_HEIGHT = 340
+# A click on the comparison map counts for the spot within this far of it.
+COMPARE_CLICK_KM = 50
 # Your hours on the water as too light, right and too strong.
 BANDS = {
     "light": ("Too light", "#334155"),
@@ -4314,7 +4214,6 @@ def compare_card(name, credit, outlook, length, rank, tags):
 
 if st.session_state["mode"] == "window":
     st.html(ANSWER_CSS)
-    activity = st.session_state["activity"]
     spots = my_locations(with_record=True)
     # The spot you picked, by its key among your others with a record here.
     where = next((key for key, entry in spots.items() if entry["path"] == dataset_path), None)
@@ -4323,38 +4222,11 @@ if st.session_state["mode"] == "window":
     entry = spots[where]
     names = spot_names(spots)
     default_dates = coming_dates(*TRIP_DAYS)
+    ask_trip_dates(f"Plan a trip to {html.escape(names[where])}", default_dates)
 
-    def trip_ask(question):
-        if question == 0:
-            dates = as_dates(ask_dates("trip_dates", default_dates, YEAR_ROWS_UP_TO))
-            # A dot a day and a row a year: two months is as wide as it goes.
-            if dates is None or len(window_days(dates)) > YEAR_ROWS_UP_TO:
-                st.warning("Pick up to two months: a regatta, a trip or a season.")
-                return False
-        elif question == 1:
-            ask_wind(activity)
-        else:
-            ask_hours()
-
-    def trip_answer(question):
-        if question == 0:
-            dates = as_dates(kept("trip_dates", default_dates))
-            return dates_label(dates) if dates else "–"
-        return wind_answer(activity) if question == 1 else hours_answer()
-
-    hints = [
-        "Only the day and month count: every year on record is checked on these dates.",
-        wind_hint(activity),
-        HOURS_HINT,
-    ]
-    ask_in_turn("trip", f"Plan a trip to {html.escape(names[where])}",
-                "what to expect on your dates", TRIP_QUESTIONS,
-                trip_ask, trip_answer, lambda question: hints[question])
-
-    # --- The answer, built up: your days, the wind, the air, then others ---
+    # --- The answer: your days, the wind, the air, then the others ---
     activity = settings("window")
-    picked = kept("trip_dates", default_dates)
-    dates = as_dates(picked)
+    dates = kept("trip_dates", default_dates)
     length = len(window_days(dates))
     wind = tuple(kept(f"wind_{activity}", ACTIVITIES[activity]["groove"]))
     hours = tuple(kept("hours", DEFAULT_HOURS))
