@@ -4,7 +4,6 @@ import html
 import io
 import json
 import re
-import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
@@ -77,11 +76,6 @@ st.html(
     .app-masthead .mark {
         font-size: 1.3rem; font-weight: 800; letter-spacing: -.025em; color: #e7ebf3;
     }
-    .app-masthead .tag {
-        font-size: .8rem; color: #8a94a8; padding-left: .7rem; margin-left: .1rem;
-        border-left: 1px solid #273043;
-    }
-    @media (max-width: 640px) { .app-masthead .tag { display: none; } }
     .st-key-nav button {
         border-radius: 999px; min-height: 2.15rem; padding: .2rem .95rem; font-size: .86rem;
     }
@@ -95,43 +89,13 @@ st.html(
     """
 )
 
-# --- House styles: motion, heroes, cards --------------------------------
+# --- House styles ---------------------------------------------------------
 # Up here so every screen gets them, the map screen included.
 
 st.html(
     """
     <style>
-    @keyframes riseIn {
-        from { opacity: 0; transform: translateY(12px); }
-        to   { opacity: 1; transform: none; }
-    }
-    @keyframes sweepIn {
-        from { opacity: 0; transform: scale(.96); }
-        to   { opacity: 1; transform: none; }
-    }
-    @keyframes popIn {
-        0%   { opacity: 0; transform: scale(.4) rotate(-18deg); }
-        70%  { opacity: 1; transform: scale(1.15) rotate(4deg); }
-        100% { opacity: 1; transform: scale(1) rotate(0); }
-    }
-    @keyframes shimmer {
-        0%   { background-position: -220% 0; }
-        100% { background-position: 220% 0; }
-    }
-
-    /* Metrics and charts arrive rather than snapping in. */
-    [data-testid="stMetric"] { animation: riseIn .5s ease both; }
-    [data-testid="stMetric"]:nth-of-type(2) { animation-delay: .07s; }
-    [data-testid="stMetric"]:nth-of-type(3) { animation-delay: .14s; }
-    [data-testid="stMetric"]:nth-of-type(4) { animation-delay: .21s; }
-    [data-testid="stVegaLiteChart"],
-    [data-testid="stImage"],
-    [data-testid="stDeckGlJsonChart"] { animation: sweepIn .55s ease both; }
-
-    /* Figures as cards: a quiet label over a large, even-width value. */
-    [data-testid="stMetric"] {
-        background: linear-gradient(180deg, #10141c, #0c1017);
-    }
+    /* Figures: a quiet label over a large, even-width value. */
     [data-testid="stMetricLabel"] p { font-size: .84rem; font-weight: 600; color: #a7b1c4; }
     [data-testid="stMetricValue"] {
         font-size: clamp(1.4rem, 2.1vw, 2rem); font-weight: 700;
@@ -139,149 +103,29 @@ st.html(
     }
 
     /* The one button that moves you on. */
-    [data-testid="stBaseButton-primary"] {
-        background: linear-gradient(90deg, #2dd4bf, #5eead4); border: 0;
-        color: #0a0d14; font-weight: 700;
-        box-shadow: 0 6px 18px rgba(45, 212, 191, .22);
-    }
-    [data-testid="stBaseButton-primary"]:hover {
-        background: linear-gradient(90deg, #5eead4, #99f6e4); color: #0a0d14;
-    }
+    [data-testid="stBaseButton-primary"] { border: 0; color: #0a0d14; font-weight: 700; }
+    [data-testid="stBaseButton-primary"]:hover { background: #5eead4; color: #0a0d14; }
     [data-testid="stBaseButton-primary"] p { font-weight: 700; }
 
-    /* Progress meters glide to their value instead of jumping. */
-    [data-testid="stProgress"] div[role="progressbar"] > div {
-        transition: width .45s cubic-bezier(.22, .68, .36, 1);
-    }
+    .rating-hero { text-align: center; padding: .4rem 0 1rem; }
+    .rating-score { font-size: 4.2rem; font-weight: 700; line-height: 1; }
 
-    .rating-hero { animation: riseIn .6s ease both; text-align: center; padding: .4rem 0 1rem; }
-    .rating-score {
-        font-size: 4.2rem; font-weight: 700; line-height: 1;
-        background: linear-gradient(100deg, currentColor 38%, #2dd4bf 50%, currentColor 62%);
-        background-size: 220% 100%;
-        -webkit-background-clip: text; background-clip: text;
-        -webkit-text-fill-color: transparent;
-        animation: shimmer 2.6s ease-in-out .5s 2;
-    }
-    .rating-stars { font-size: 1.6rem; letter-spacing: .18rem; }
-    .rating-stars span { display: inline-block; animation: popIn .45s ease both; }
-    .rating-stars span:nth-child(2) { animation-delay: .09s; }
-    .rating-stars span:nth-child(3) { animation-delay: .18s; }
-    .rating-stars span:nth-child(4) { animation-delay: .27s; }
-    .rating-stars span:nth-child(5) { animation-delay: .36s; }
-
-    /* Hero blocks on the entry screens. */
-    .hero { animation: riseIn .55s ease both; padding: .2rem 0 1.1rem; position: relative; }
+    /* The spot at the top of its screens. */
+    .hero { padding: .2rem 0 1.1rem; }
     .hero-title {
-        font-size: 2.9rem; font-weight: 700; line-height: 1.1; letter-spacing: -.025em;
+        font-size: 2.6rem; font-weight: 700; line-height: 1.1; letter-spacing: -.02em;
         color: #e7ebf3;
     }
-    .hero-sub {
-        font-size: 1.02rem; opacity: .72; max-width: 52ch; margin-top: .6rem;
-        line-height: 1.55; animation: riseIn .6s ease .12s both;
-    }
-    .hero-eyebrow {
-        text-transform: uppercase; letter-spacing: .16em; font-size: .72rem;
-        font-weight: 600; margin-bottom: .3rem; color: #2dd4bf; opacity: .9;
-    }
-    .stat-strip {
-        display: flex; gap: .45rem; flex-wrap: wrap;
-        font-size: .82rem; margin-top: .7rem; color: #a7b1c4;
-    }
-    .stat-strip span {
-        border: 1px solid #273043; border-radius: 999px; background: #0f131b;
-        padding: .28rem .75rem;
-    }
-    .stat-strip b { font-weight: 600; color: #7dd3fc; }
-
-    /* Wind drifting across the hero. */
-    @keyframes drift {
-        from { transform: translateX(-18%); }
-        to   { transform: translateX(18%); }
-    }
-    @keyframes breathe {
-        0%, 100% { opacity: .45; }
-        50%      { opacity: .9; }
-    }
-
-    .hero-streaks {
-        position: absolute; inset: -20% -30%; z-index: 0; pointer-events: none;
-        background: repeating-linear-gradient(
-            74deg, transparent 0 22px,
-            rgba(125, 211, 252, .16) 22px 23px,
-            transparent 23px 60px,
-            rgba(45, 212, 191, .13) 60px 61px,
-            transparent 61px 104px
-        );
-        -webkit-mask-image: radial-gradient(70% 120% at 20% 40%, #000 0%, transparent 72%);
-        mask-image: radial-gradient(70% 120% at 20% 40%, #000 0%, transparent 72%);
-        animation: drift 13s ease-in-out infinite alternate, breathe 7s ease-in-out infinite;
-    }
-    .hero > *:not(.hero-streaks) { position: relative; z-index: 1; }
+    .hero-facts { font-size: .88rem; margin-top: .5rem; color: #8a94a8; }
 
     /* Landing: the first screen anyone sees. */
-    .landing {
-        position: relative; overflow: hidden; padding: 2.4rem 0 1.6rem;
-        animation: riseIn .55s ease both;
-    }
-    .landing::after {
-        content: ""; position: absolute; z-index: 0; pointer-events: none;
-        right: -12%; top: -40%; width: 60%; height: 140%;
-        background: radial-gradient(closest-side, rgba(45, 212, 191, .16), transparent);
-    }
-    .landing > *:not(.hero-streaks) { position: relative; z-index: 1; }
-    .landing-grid {
-        display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
-        gap: 2.5rem; align-items: end;
-    }
-    @media (max-width: 900px) { .landing-grid { grid-template-columns: 1fr; gap: 1.4rem; } }
-    .landing-eyebrow {
-        display: flex; align-items: center; gap: .6rem;
-        font-size: .72rem; font-weight: 700; letter-spacing: .18em;
-        text-transform: uppercase; color: #2dd4bf;
-    }
-    .landing-eyebrow::before {
-        content: ""; width: 32px; height: 2px;
-        background: linear-gradient(90deg, #2dd4bf, #7dd3fc);
-    }
+    .landing { padding: 1.6rem 0 1rem; }
     .landing-title {
-        font-size: clamp(2.4rem, 5.2vw, 4.4rem); font-weight: 800; line-height: 1.02;
-        letter-spacing: -.04em; color: #e7ebf3; margin-top: .8rem; max-width: 15ch;
-    }
-    .landing-title .wind {
-        background: linear-gradient(90deg, #2dd4bf, #7dd3fc 55%, #a78bfa);
-        -webkit-background-clip: text; background-clip: text;
-        -webkit-text-fill-color: transparent;
+        font-size: clamp(2rem, 3.6vw, 2.8rem); font-weight: 700; line-height: 1.1;
+        letter-spacing: -.02em; color: #e7ebf3;
     }
     .landing-sub {
-        font-size: 1.08rem; line-height: 1.6; color: #a7b1c4; max-width: 56ch;
-        margin-top: 1.1rem; animation: riseIn .6s ease .12s both;
-    }
-    .landing-steps {
-        display: flex; flex-wrap: wrap; gap: .5rem 1.4rem; margin-top: 1.4rem;
-        font-size: .9rem; color: #c3cbda; animation: riseIn .6s ease .2s both;
-    }
-    .landing-steps span { display: inline-flex; align-items: center; gap: .55rem; }
-    .landing-steps b {
-        display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem;
-        border: 1px solid #273043; border-radius: 4px; background: #12161f;
-        color: #fbbf24; font-size: .78rem;
-    }
-    .landing-facts {
-        display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem;
-        animation: riseIn .6s ease .28s both;
-    }
-    .landing-facts div {
-        border: 1px solid #273043; border-left: 3px solid #2dd4bf; border-radius: 4px;
-        background: rgba(18, 22, 31, .72); padding: .75rem .9rem;
-    }
-    .landing-facts div:nth-child(2n) { border-left-color: #7dd3fc; }
-    .landing-facts b {
-        display: block; font-size: 1.45rem; font-weight: 800; letter-spacing: -.02em;
-        color: #e7ebf3;
-    }
-    .landing-facts span {
-        font-size: .7rem; letter-spacing: .1em; text-transform: uppercase; color: #8a94a8;
+        font-size: 1.02rem; line-height: 1.6; color: #a7b1c4; max-width: 62ch; margin-top: .6rem;
     }
     .section-label {
         display: flex; align-items: baseline; gap: .7rem; margin: 0 0 .2rem;
@@ -291,20 +135,14 @@ st.html(
 
     /* The spot you just clicked: the one thing to act on next. */
     .st-key-picked_panel {
-        border: 1px solid rgba(45, 212, 191, .65) !important; border-radius: 6px;
-        background: linear-gradient(180deg, rgba(45, 212, 191, .08), transparent 70%);
-        padding: 1rem 1.1rem;
+        border: 1px solid #273043 !important; border-radius: 6px; padding: 1rem 1.1rem;
     }
     /* Saved spots as list rows: hover finds them on the map, Open reopens. */
     [class*="st-key-spot_card_"] {
-        border: 1px solid #273043; border-left: 3px solid #7dd3fc; border-radius: 4px;
+        border: 1px solid #273043; border-radius: 4px;
         background: #10141c; padding: .55rem .7rem .55rem .85rem;
-        transition: background .15s ease, border-color .15s ease;
     }
-    [class*="st-key-spot_card_"]:hover {
-        border-left-color: #2dd4bf; border-color: rgba(45, 212, 191, .45);
-        background: #161b27;
-    }
+    [class*="st-key-spot_card_"]:hover { border-color: #3a4558; background: #161b27; }
     [class*="st-key-spot_card_"] p { margin-bottom: 0; line-height: 1.45; }
     /* Text and Open button share one line; the text wraps instead. */
     [class*="st-key-spot_card_"] { flex-wrap: nowrap !important; }
@@ -340,13 +178,9 @@ st.html(
             [data-testid="stHorizontalBlock"]):not(:has([data-stale="false"])) {
         display: none !important;
     }
-    .loading-eyebrow {
-        font-size: .7rem; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
-        color: #2dd4bf;
-    }
     .loading-title {
-        font-size: clamp(1.6rem, 3vw, 2.3rem); font-weight: 800; letter-spacing: -.02em;
-        line-height: 1.1; color: #e7ebf3; margin: .3rem 0 .6rem;
+        font-size: clamp(1.6rem, 3vw, 2.2rem); font-weight: 700; letter-spacing: -.02em;
+        line-height: 1.1; color: #e7ebf3; margin: 0 0 .6rem;
     }
     .loading-note { color: #8a94a8; font-size: .95rem; line-height: 1.5; }
     .loading-bar {
@@ -355,7 +189,7 @@ st.html(
     }
     .loading-bar > i {
         position: absolute; top: 0; bottom: 0; left: 0; width: 0; border-radius: 999px;
-        background: linear-gradient(90deg, #2dd4bf, #7dd3fc); transition: width .5s ease;
+        background: #2dd4bf; transition: width .5s ease;
     }
     .loading-bar.unknown > i { width: 38%; animation: loadingSweep 1.5s ease-in-out infinite; }
     @keyframes loadingSweep { from { left: -40%; } to { left: 100%; } }
@@ -371,79 +205,28 @@ st.html(
     .small-print a { color: #7dd3fc; text-decoration: none; }
     .small-print a:hover { color: #2dd4bf; }
 
-    /* The map sits in its own rounded panel rather than running edge to edge. */
-    iframe[title="streamlit_folium.st_folium"] {
-        border-radius: 6px;
-        box-shadow: 0 14px 40px rgba(0, 0, 0, .22);
-        animation: sweepIn .7s ease .18s both;
-    }
-
-    /* Words rise in one after another when a view switches. */
-    @keyframes wordIn {
-        from { opacity: 0; transform: translateY(14px); filter: blur(4px); }
-        to   { opacity: 1; transform: none; filter: none; }
-    }
-    .reveal span {
-        display: inline-block;
-        opacity: 0;
-        animation: wordIn .55s cubic-bezier(.2,.7,.3,1) both;
-    }
+    iframe[title="streamlit_folium.st_folium"] { border-radius: 6px; }
 
     /* Every setting lives in the sidebar. Closed, its only way back is a
-       faded arrow in the corner, so turn that into a button nobody misses. */
+       faded arrow in the corner, so give it a label. */
     [data-testid="stExpandSidebarButton"] {
         display: inline-flex !important; align-items: center; gap: .35rem;
         background: #2dd4bf !important; border-radius: 999px !important;
         padding: .3rem .9rem .3rem .55rem !important;
-        animation: settingsPulse 2.4s ease-out infinite;
     }
     [data-testid="stExpandSidebarButton"] span { color: #0a0d14 !important; }
     [data-testid="stExpandSidebarButton"]::after {
         content: "Filter"; color: #0a0d14; font-weight: 700; font-size: .9rem;
     }
-    [data-testid="stExpandSidebarButton"]:hover { background: #fbbf24 !important; }
-    @keyframes settingsPulse {
-        0%   { box-shadow: 0 0 0 0 rgba(45, 212, 191, .55); }
-        70%  { box-shadow: 0 0 0 12px rgba(45, 212, 191, 0); }
-        100% { box-shadow: 0 0 0 0 rgba(45, 212, 191, 0); }
-    }
-    /* Open, an accent edge sets it apart from the page. */
-    [data-testid="stSidebar"] { border-right: 2px solid rgba(45, 212, 191, .35); }
+    [data-testid="stExpandSidebarButton"]:hover { background: #5eead4 !important; }
 
-    /* Colour accent on the dark ground. */
-    .accent-rule {
-        height: 3px; border: 0; border-radius: 3px; margin: .2rem 0 1.1rem;
-        background: linear-gradient(90deg, #2dd4bf, #7dd3fc 32%, #a78bfa 68%, transparent);
-        animation: sweepIn .7s ease both;
-    }
-
-    /* Numbered steps on the spot screen, the same badges as the landing's. */
-    .step-label {
-        display: flex; align-items: center; gap: .6rem;
-        font-size: 1.02rem; font-weight: 700; color: #e7ebf3; margin: .1rem 0 .15rem;
-    }
-    .step-label b, .answered b, .asking b, .upcoming b {
-        display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; flex: none;
-        border: 1px solid #273043; border-radius: 4px; background: #12161f;
-        color: #fbbf24; font-size: .78rem;
-    }
+    .step-label { font-size: 1.02rem; font-weight: 700; color: #e7ebf3; margin: .6rem 0 .15rem; }
     .st-key-activity_pick button { min-height: 2.6rem; padding: 0 1.05rem; }
     /* All four sports on one line on a phone, wrapping only if that fails. */
     .st-key-activity_pick [data-testid="stButtonGroup"] > div:last-child { flex-wrap: wrap; }
     @media (max-width: 640px) { .st-key-activity_pick button { padding: 0 .6rem; } }
-    /* Step 1 is done by the time you are here: your spot. */
-    .spot-eyebrow { display: flex; align-items: center; gap: .55rem; }
-    .spot-eyebrow b {
-        display: inline-grid; place-items: center; width: 1.35rem; height: 1.35rem;
-        border: 1px solid rgba(45, 212, 191, .55); border-radius: 4px;
-        font-size: .68rem; letter-spacing: 0;
-    }
-    /* Arriving draws the rule in (see START_BUILD_CSS); nothing else moves it. */
-    .spot-hero .accent-rule { animation: none; }
-    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-    @keyframes bandGrow { from { transform: scaleX(0); } to { transform: none; } }
 
-    /* The sport's range on a knot ruler. It grows into place each time. */
+    /* The sport's range on a knot ruler. */
     .groove { margin: .35rem 0 0; padding-top: 1.3rem; }
     .groove-track, .groove-scale { max-width: 440px; }
     .groove-track { position: relative; height: 6px; border-radius: 3px; background: #181d29; }
@@ -452,16 +235,12 @@ st.html(
         background: repeating-linear-gradient(90deg, #2a3344 0 1px, transparent 1px 12.5%);
     }
     .groove-band {
-        position: absolute; top: -1px; bottom: -1px; border-radius: 4px;
-        background: linear-gradient(90deg, #fbbf24, #2dd4bf);
-        box-shadow: 0 0 0 3px rgba(45, 212, 191, .14);
-        transform-origin: left center;
-        animation: bandGrow .65s cubic-bezier(.2, .7, .3, 1) both;
+        position: absolute; top: -1px; bottom: -1px; border-radius: 4px; background: #2dd4bf;
     }
     .groove em {
         position: absolute; bottom: calc(100% + 7px); transform: translateX(-50%);
         font-style: normal; font-size: .76rem; font-weight: 700; color: #e7ebf3;
-        white-space: nowrap; animation: fadeIn .3s ease .45s both;
+        white-space: nowrap;
     }
     .groove-scale { position: relative; height: .9rem; margin-top: .45rem; }
     .groove-scale span {
@@ -479,33 +258,24 @@ st.html(
     @property --glow { syntax: "\\3c color>"; inherits: true; initial-value: #7dd3fc; }
     [data-testid="stLayoutWrapper"]:has(> [class*="st-key-choice_"]) { flex: 1 1 auto; }
     [class*="st-key-choice_"] {
-        position: relative; overflow: hidden;
-        padding: 0 0 5.4rem !important; background: #0c1017;
-        border: 1px solid #273043 !important; border-radius: 8px !important;
+        position: relative; overflow: hidden; padding: 0 0 4.4rem !important;
+        background: #0c1017; border: 1px solid #273043 !important; border-radius: 8px !important;
         transition: border-color .3s ease, --tone .35s ease, --glow .35s ease;
     }
     [class*="st-key-choice_"]:hover:not(:has(button:disabled)) {
-        --tone: #2dd4bf; --glow: #fbbf24; border-color: rgba(45, 212, 191, .6) !important;
+        --tone: #2dd4bf; --glow: #fbbf24; border-color: #2dd4bf !important;
     }
-    [class*="st-key-choice_"]:has(button:focus-visible) {
-        border-color: #2dd4bf !important; box-shadow: 0 0 0 1px #2dd4bf;
-    }
-    /* The cards fill the screen: each drawing scaled up as a whole. */
     .choice-face {
         height: 200px; display: flex; align-items: center; justify-content: center;
         gap: 1.5rem; background: #0a0d14; border-bottom: 1px solid #1a2030;
     }
     .choice-face > * { zoom: 1.35; }
-    .choice-text { padding: 1.4rem 1.6rem 0; }
-    .choice-kicker {
-        font-size: .74rem; font-weight: 700; letter-spacing: .16em;
-        text-transform: uppercase; color: #8a94a8;
+    [class*="st-key-choice_"]:has(button:focus-visible) {
+        border-color: #2dd4bf !important; box-shadow: 0 0 0 1px #2dd4bf;
     }
-    .choice-title {
-        font-size: 1.8rem; font-weight: 800; letter-spacing: -.025em;
-        color: #e7ebf3; margin-top: .35rem;
-    }
-    .choice-blurb { font-size: 1.04rem; line-height: 1.55; color: #a7b1c4; margin-top: .4rem; }
+    .choice-text { padding: 1.3rem 1.5rem 0; }
+    .choice-title { font-size: 1.4rem; font-weight: 700; color: #e7ebf3; }
+    .choice-blurb { font-size: .98rem; line-height: 1.5; color: #a7b1c4; margin-top: .35rem; }
     .choice-lock { font-size: .82rem; font-weight: 600; color: #fbbf24; margin-top: .55rem; }
     [class*="st-key-choice_"] [class*="st-key-pick_"] {
         position: absolute; inset: 0; z-index: 2; width: auto !important;
@@ -513,7 +283,7 @@ st.html(
     [class*="st-key-choice_"] [class*="st-key-pick_"] .stButton,
     [class*="st-key-choice_"] [class*="st-key-pick_"] button { width: 100%; height: 100%; }
     [class*="st-key-choice_"] [class*="st-key-pick_"] button {
-        display: flex; align-items: flex-end; padding: 0 1.6rem 1.3rem;
+        display: flex; align-items: flex-end; padding: 0 1.5rem 1.1rem;
         background: transparent !important; border: 0 !important; border-radius: 0;
         box-shadow: none !important;
     }
@@ -524,42 +294,39 @@ st.html(
     }
     [class*="st-key-choice_"] [class*="st-key-pick_"] button p {
         display: flex; justify-content: space-between; align-items: center;
-        padding-top: 1rem; border-top: 1px solid #1f2634;
-        font-size: 1.02rem; font-weight: 700; color: #e7ebf3; transition: color .25s ease;
+        padding-top: .9rem; border-top: 1px solid #1f2634;
+        font-size: 1rem; font-weight: 700; color: #e7ebf3;
     }
-    [class*="st-key-choice_"] [class*="st-key-pick_"] button p::after {
-        content: "→"; font-size: 1.05rem; color: #5b6478;
-        transition: transform .25s ease, color .25s ease;
-    }
-    [class*="st-key-choice_"]:hover [class*="st-key-pick_"] button:not(:disabled) p { color: #2dd4bf; }
+    [class*="st-key-choice_"] [class*="st-key-pick_"] button p::after { content: "→"; color: #5b6478; }
+    [class*="st-key-choice_"]:hover [class*="st-key-pick_"] button:not(:disabled) p,
     [class*="st-key-choice_"]:hover [class*="st-key-pick_"] button:not(:disabled) p::after {
-        color: #2dd4bf; transform: translateX(5px);
+        color: #2dd4bf;
     }
     [class*="st-key-choice_"] button:disabled { cursor: not-allowed; }
     [class*="st-key-choice_"] button:disabled p { color: #5b6478 !important; }
     [class*="st-key-choice_"]:has(button:disabled) .choice-face { opacity: .35; }
-    [class*="st-key-choice_"]:has(button:disabled) :is(.dial-needle > span, .grid i, .days-frame > span) {
-        animation-play-state: paused;
-    }
+    [class*="st-key-choice_"]:has(button:disabled) .choice-face * { animation-play-state: paused; }
 
-    /* Rate: a meter from 0 to 10 whose needle hunts and never settles. */
-    /* Ticks every 22 degrees round a 220 degree arc, 0 bottom left. */
-    .dial { position: relative; width: 150px; height: 108px; flex: none; }
-    .dial i {
+    /* Rate: a meter from 0 to 10 whose needle hunts and never settles.
+       Ticks every 22 degrees round a 220 degree arc, 0 bottom left. */
+    .choice-face .dial { position: relative; width: 150px; height: 108px; flex: none; }
+    .choice-face .dial i {
         position: absolute; left: calc(50% - 1px); bottom: 30px;
         width: 2px; height: 8px; border-radius: 1px; transform-origin: 50% 100%;
         transform: rotate(calc(var(--n) * 22deg - 110deg)) translateY(-62px);
         background: color-mix(in srgb, var(--tone) 60%, #1a2030);
     }
-    .dial i:nth-of-type(5n+1) { height: 13px; background: var(--glow); }
-    .dial-needle { position: absolute; left: calc(50% - 1.5px); bottom: 30px; width: 3px; height: 54px; }
-    .dial-needle > span {
+    .choice-face .dial i:nth-of-type(5n+1) { height: 13px; background: var(--glow); }
+    .choice-face .dial-needle {
+        position: absolute; left: calc(50% - 1.5px); bottom: 30px; width: 3px; height: 54px;
+    }
+    .choice-face .dial-needle > span {
         display: block; height: 100%; border-radius: 3px; transform-origin: 50% 100%;
         transform: rotate(-110deg);
         background: linear-gradient(to top, var(--tone), var(--glow));
         animation: needleHunt 6.5s ease-in-out infinite;
     }
-    .dial::after {
+    .choice-face .dial::after {
         content: ""; position: absolute; left: calc(50% - 6px); bottom: 24px;
         width: 12px; height: 12px; border-radius: 50%; box-sizing: border-box;
         background: #0a0d14; border: 2px solid var(--glow);
@@ -571,25 +338,25 @@ st.html(
         60%      { transform: rotate(88deg); }
         78%      { transform: rotate(-30deg); }
     }
-    .dial-read { display: flex; flex-direction: column; line-height: 1; }
-    .dial-read b { font-size: 2.7rem; font-weight: 800; letter-spacing: -.04em; color: var(--glow); }
-    .dial-read small {
+    .choice-face .dial-read { display: flex; flex-direction: column; line-height: 1; }
+    .choice-face .dial-read b {
+        font-size: 2.7rem; font-weight: 800; letter-spacing: -.04em; color: var(--glow);
+    }
+    .choice-face .dial-read small {
         margin-top: .35rem; font-size: .66rem; font-weight: 600; letter-spacing: .14em;
         text-transform: uppercase; color: #8a94a8;
     }
 
     /* Explore: a month-by-hour grid with a wash passing over it. */
-    .grid { display: flex; gap: 3px; }
-    .grid > span { display: flex; flex-direction: column; align-items: center; gap: 3px; }
-    .grid i {
+    .choice-face .grid { display: flex; gap: 3px; }
+    .choice-face .grid > span { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+    .choice-face .grid i {
         width: 10px; height: 10px; border-radius: 2px; background: #181d29;
         animation: cellWash 4s ease-in-out infinite;
         animation-delay: calc(var(--c) * .12s + var(--r) * .08s - 4s);
     }
-    .grid small, .day small {
-        font-size: .62rem; font-weight: 600; line-height: 1; color: #5b6478;
-    }
-    .grid small { margin-top: 3px; }
+    .choice-face small { font-size: .62rem; font-weight: 600; line-height: 1; color: #5b6478; }
+    .choice-face .grid small { margin-top: 3px; }
     @keyframes cellWash {
         0%, 46%, 100% { background: #181d29; }
         18%           { background: var(--tone); }
@@ -597,12 +364,12 @@ st.html(
     }
 
     /* Plan a trip: two weeks with a frame stepping along them. */
-    .days { position: relative; display: flex; gap: 4px; }
-    .day { display: flex; flex-direction: column; align-items: center; gap: 5px; }
-    .day i { width: 16px; height: 28px; border-radius: 3px; background: #181d29; }
-    .day:nth-child(7n) i, .day:nth-child(7n+6) i { background: #1e2533; }
-    .days-frame { position: absolute; left: 0; bottom: 0; width: 100%; height: 28px; }
-    .days-frame > span {
+    .choice-face .days { position: relative; display: flex; gap: 4px; }
+    .choice-face .day { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+    .choice-face .day i { width: 16px; height: 28px; border-radius: 3px; background: #181d29; }
+    .choice-face .day:nth-child(7n) i, .choice-face .day:nth-child(7n+6) i { background: #1e2533; }
+    .choice-face .days-frame { position: absolute; left: 0; bottom: 0; width: 100%; height: 28px; }
+    .choice-face .days-frame > span {
         position: absolute; left: -3px; top: -3px; width: 102px; height: 34px;
         box-sizing: border-box; border: 2px solid var(--glow); border-radius: 5px;
         background: color-mix(in srgb, var(--tone) 24%, transparent);
@@ -613,31 +380,15 @@ st.html(
         60%  { transform: translateX(180px); animation-timing-function: steps(9, end); }
         100% { transform: translateX(0); }
     }
-    @media (prefers-reduced-motion: reduce) {
-        .dial-needle > span, .grid i, .days-frame > span { animation: none; }
-    }
+    @media (prefers-reduced-motion: reduce) { .choice-face * { animation: none !important; } }
 
-    /* Explore and the trip planner: one question at a time. */
-    .view-title { font-size: 1.9rem; font-weight: 800; letter-spacing: -.03em; line-height: 1.15; }
-    .view-sub { color: #a7b1c4; font-size: .98rem; margin: .3rem 0 .9rem; }
-    .answered, .upcoming {
-        display: flex; align-items: center; gap: .75rem; font-size: .95rem; padding: .2rem 0;
-    }
-    .answered b { border-color: rgba(45, 212, 191, .55); color: #2dd4bf; }
-    .answered span { color: #8a94a8; min-width: 5.5rem; }
-    .answered strong { color: #e7ebf3; font-weight: 700; }
-    .upcoming { color: #5b6478; }
-    .upcoming b { color: #5b6478; }
+    /* The trip planner's question. */
+    .view-title { font-size: 1.9rem; font-weight: 700; letter-spacing: -.02em; line-height: 1.15; margin-bottom: .9rem; }
     .st-key-asking {
-        border: 1px solid rgba(45, 212, 191, .55); border-radius: 10px;
+        border: 1px solid #273043; border-radius: 8px;
         padding: 1.1rem 1.3rem 1.2rem; margin: .35rem 0; background: #0f131b;
-        animation: riseIn .4s ease both;
     }
-    .asking {
-        display: flex; align-items: center; gap: .75rem;
-        font-size: 1.2rem; font-weight: 800; color: #e7ebf3;
-    }
-    .asking b { background: #2dd4bf; border-color: #2dd4bf; color: #0a0d14; }
+    .asking { font-size: 1.2rem; font-weight: 700; color: #e7ebf3; }
     </style>
     """
 )
@@ -645,8 +396,7 @@ st.html(
 # One bar across the top of every screen. Inside a spot the way back joins it.
 topbar = st.container(horizontal=True, vertical_alignment="center", key="topbar")
 topbar.html(
-    f'<div class="app-masthead">{LOGO}<span class="mark">Wind Atlas</span>'
-    '<span class="tag">Eighty years of hourly wind, anywhere you sail</span></div>'
+    f'<div class="app-masthead">{LOGO}<span class="mark">Wind Atlas</span></div>'
     f'<div class="app-version">v{APP_VERSION}</div>'
 )
 
@@ -1272,17 +1022,12 @@ def small_print():
     credits the sources' licences ask for."""
     st.html(
         '<div class="small-print">'
-        "<p><b>For planning, not for navigation.</b> Wind Atlas sums up past records: "
-        "model estimates and station readings with gaps and errors of their own, shown "
-        "as their sources published them, and no forecast of any kind. Use it at your "
-        "own risk, and check the official forecasts and warnings before you go out. The "
-        "author accepts no liability for any loss or damage arising from its use.</p>"
-        f"<p>Contains modified Copernicus Climate Change Service information {date.today().year} "
-        "(ERA5); neither the European Commission nor ECMWF is responsible for any use "
-        'that may be made of it. <a href="https://open-meteo.com/">Weather data by '
-        "Open-Meteo.com</a> (AROME HD, CC BY 4.0): forecast runs stitched together, not a "
-        "reanalysis. MeteoSwiss open data (CC BY 4.0). METARs from the Iowa Environmental "
-        "Mesonet. Towns from GeoNames (CC BY 4.0), shores and waters from Natural Earth.</p>"
+        "<p><b>Past records, not a forecast.</b> Check the official forecast before you "
+        "go out. Use at your own risk.</p>"
+        f"<p>Contains modified Copernicus Climate Change Service information {date.today().year}; "
+        "neither the European Commission nor ECMWF is responsible for any use made of it. "
+        'Data: <a href="https://open-meteo.com/">Open-Meteo.com</a>, MeteoSwiss, GeoNames '
+        "(CC BY 4.0), Iowa Environmental Mesonet, Natural Earth.</p>"
         "</div>"
     )
 
@@ -1357,8 +1102,8 @@ STATION_KEY = re.compile(r"(station|metar)_(\w+)")
 
 LINK_NOTE_HEIGHT = 46
 LINK_NOTE = (
-    '<div class="link-note">Your spots live in this page\'s address: bookmark it to keep '
-    "them, send it to share them. Copy link and Clear sit in the bar above.</div>"
+    '<div class="link-note">Your spots are saved in this page\'s address: bookmark it or '
+    "share it.</div>"
 )
 
 # The copy link in the top bar: the address, spots and all, to the clipboard.
@@ -1601,43 +1346,12 @@ def style_figure(fig, *axes):
     return fig
 
 
-# Teal-to-violet ramp used for word-by-word headings.
-GRADIENT = ["#2dd4bf", "#7dd3fc", "#a78bfa"]
-
-
 def blend(first, second, amount):
     pair = [
         round(int(first[i:i + 2], 16) * (1 - amount) + int(second[i:i + 2], 16) * amount)
         for i in (1, 3, 5)
     ]
     return "#{:02x}{:02x}{:02x}".format(*pair)
-
-
-def ramp_colour(fraction):
-    """Colour at `fraction` along the multi-stop gradient."""
-    span = len(GRADIENT) - 1
-    position = min(max(fraction, 0.0), 1.0) * span
-    index = min(int(position), span - 1)
-    return blend(GRADIENT[index], GRADIENT[index + 1], position - index)
-
-
-def reveal(text, delay=0.0, step=0.055, coloured=True):
-    """Wrap each word so it rises in one after another, tinted along the ramp.
-
-    The colour is baked per word rather than clipped from a background
-    gradient: an animated inline-block paints on its own, which silently
-    breaks `background-clip: text` on the parent.
-    """
-    words = str(text).split()
-    total = max(len(words) - 1, 1)
-    pieces = []
-    for index, word in enumerate(words):
-        tint = f"color:{ramp_colour(index / total)};" if coloured else ""
-        pieces.append(
-            f'<span style="{tint}animation-delay:{delay + index * step:.2f}s">'
-            f"{word}&nbsp;</span>"
-        )
-    return "".join(pieces)
 
 
 def pick(value, fallback):
@@ -1807,11 +1521,7 @@ MAP_CHROME_CSS = """
 .spot-dot.picked::after {
     content: ""; position: absolute; inset: -5px; border-radius: 50%;
     border: 2px solid rgba(45,212,191,.55);
-    animation: spotPulse 2s ease-out infinite;
-}
-@keyframes spotPulse {
-    0%   { transform: scale(.7); opacity: .9; }
-    100% { transform: scale(1.9); opacity: 0; }
+
 }
 /* Tile licences require the credit to stay, so shrink it out of the way
    rather than deleting it. */
@@ -2079,73 +1789,22 @@ if st.session_state["spot"] is None:
         # A summit station looks down on the water rather than standing by it.
         stations = stations[by_a_shore(stations, SHORE_KM) & ~stations["summit"]]
 
-    if source == "metar":
-        pitch = (
-            "Click near any airport in the world and pull every weather report it "
-            "has sent: wind measured beside the runway, most of it every half hour. "
-        )
-        facts = [
-            ("Hourly", "most since the 1970s"),
-            ("Measured", "not modelled"),
-            (f"{len(stations):,}" if stations is not None else "1,400+",
-             "airports by the water" if by_water else "airports"),
-        ]
-    elif source == "meteoswiss":
-        pitch = (
-            "Click any MeteoSwiss weather station and pull every hour it has "
-            "measured. Real readings from the shore rather than a 25 km model "
-            "cell, so lakes and valleys get their own wind. "
-        )
-        facts = [
-            (f"{stations['since'].min():.0f}" if stations is not None else "1981",
-             "first year on record"),
-            ("Measured", "not modelled"),
-            (len(stations) if stations is not None else "25+",
-             "stations by the water" if by_water else "stations with wind"),
-        ]
-    elif source == "arome":
-        pitch = (
-            "Click any water in western Europe and pull every hour since November "
-            "2022 from Météo-France's AROME model at 1.5 km: lakes, bays and straits "
-            "get their own wind rather than a 25 km average. Not a reanalysis: the "
-            "first hours of each forecast run stitched together, and only a few years "
-            "of them, so one odd summer carries weight. "
-        )
-        facts = [
-            ("1.5 km", "per grid cell"),
-            (f"{AROME_SINCE:%b %Y}", "first month on record"),
-            ("Hourly", "every day since"),
-        ]
-    else:
-        pitch = (
-            "Click any stretch of water and pull twenty years of hourly wind for that "
-            "spot, and every year since 1940 if you ask. "
-        )
-        facts = [
-            ("1940", "first year on record"),
-            ("Hourly", "every day since"),
-            ("25 km", "per grid cell"),
-        ]
-    facts.append((len(saved), "spots in your list"))
+    # One line on what a click fetches from the chosen source.
+    pitch = {
+        "metar": "Click near an airport to download every wind report it has sent, "
+                 "measured beside the runway.",
+        "meteoswiss": "Click a MeteoSwiss station to download every hour it has measured.",
+        "arome": f"Click any water in western Europe to download every hour since "
+                 f"{AROME_SINCE:%B %Y} from Météo-France's 1.5 km AROME model.",
+        "era5": "Click any water to download twenty years of hourly ERA5 wind for that "
+                "spot, 25 km cells, back to 1940 on request.",
+    }[source]
 
     st.html(
         '<div class="landing">'
-        '<div class="hero-streaks"></div>'
-        '<div class="landing-grid"><div>'
-        '<div class="landing-eyebrow">Wind history for sailors</div>'
-        '<div class="landing-title">Find where the <span class="wind">wind</span> '
-        "really blows</div>"
-        f'<div class="landing-sub">{pitch}See how often it is sailable for what you '
-        "ride, in which months, at what time of day — and what to expect on the dates "
-        "you are going, next to your other spots.</div>"
-        '<div class="landing-steps">'
-        "<span><b>1</b>Pick a spot</span>"
-        "<span><b>2</b>Choose your sport</span>"
-        "<span><b>3</b>Rate it, explore it or plan a trip</span>"
-        "</div></div>"
-        '<div class="landing-facts">'
-        + "".join(f"<div><b>{value}</b><span>{label}</span></div>" for value, label in facts)
-        + "</div></div></div>"
+        '<div class="landing-title">Hourly wind history for any spot</div>'
+        f'<div class="landing-sub">{pitch} Then see how often it is sailable for you, '
+        "or compare it with other spots on the dates you are going.</div></div>"
     )
 
     preset, found = None, None
@@ -2469,7 +2128,6 @@ if dataset_path.exists() and "fetch_first" not in st.session_state:
         disabled=current_mode is not None or forward_target is None,
     ):
         st.session_state["mode"] = forward_target
-        st.session_state["rating_fresh"] = forward_target == "rating"
         st.rerun()
 
     if nav.button(":material/home: Start over", type="tertiary"):
@@ -2497,8 +2155,7 @@ def loading_screen(note):
     None, and `clear`, which takes the bar away."""
     with st.container(key="loading_screen"):
         st.html(
-            '<div class="loading-eyebrow">Downloading the record</div>'
-            f'<div class="loading-title">{html.escape(LOCATION_NAME)}</div>'
+            f'<div class="loading-title">Downloading {html.escape(LOCATION_NAME)}</div>'
             f'<div class="loading-note">{note}</div>'
         )
         slot = st.empty()
@@ -2667,8 +2324,8 @@ def what_to_expect(rating, activity, wind, lasting, session_text, missing_temp,
     warmth = rating.get("warmth")
     if warmth:
         lines.append(
-            f"On days you would sail it averages **{warmth['on_good_days']:.0f}°C** "
-            f"— {kit_for(warmth['on_good_days'])}. Ranges from "
+            f"On days you would sail it averages **{warmth['on_good_days']:.0f}°C**: "
+            f"{kit_for(warmth['on_good_days'])}. It ranges from "
             f"{warmth['coolest']:.0f}°C in {calendar.month_name[warmth['coolest_month']]} "
             f"to {warmth['warmest']:.0f}°C in {calendar.month_name[warmth['warmest_month']]}."
         )
@@ -2883,59 +2540,18 @@ if "mode" not in st.session_state:
 
 
 # --- Start screen ---------------------------------------------------------
-# Your spot beside its map, then the sport, then three ways in, and the
-# screen builds up in that order when you arrive. The cards only say what
-# each view answers, and their drawings show nothing about this spot: the
-# answers wait until you open one.
+# Your spot beside its map, then the sport, then three ways in, each card
+# with a small moving drawing of what it answers.
 
 CHOICES = [
-    ("rating", "One number", "Rate this spot",
-     "One score out of ten for what you sail.", "Rate it"),
-    ("explore", "The whole picture", "Explore this spot",
-     "Windy days month by month and the wind rose, with more to switch on in the panel on the left.",
+    ("rating", "Rate this spot", "One score out of ten for what you sail.", "Rate it"),
+    ("explore", "Explore this spot", "Windy days by month, the wind rose and more.",
      "Explore"),
-    ("window", "Your dates", "Plan a trip",
-     "Off to a regatta or a week away? See what to expect on your dates, beside other spots.",
+    ("window", "Plan a trip", "What to expect on your dates, compared with other spots.",
      "Plan a trip"),
 ]
 # Knots across the sport's ruler: enough for the kite's top end.
 GROOVE_SCALE = 40
-
-# The order the screen builds up in. Sent only when you arrive, so a sport
-# change redraws at once. Only these rules animate these elements: one left
-# behind would restart when the sheet goes away.
-START_BUILD_CSS = """
-<style>
-@keyframes drawRule { from { transform: scaleX(0); } to { transform: none; } }
-@media (prefers-reduced-motion: no-preference) {
-    .spot-hero .hero-eyebrow { animation: riseIn .45s ease both; }
-    .spot-hero .accent-rule {
-        transform-origin: left; animation: drawRule .9s cubic-bezier(.65, 0, .35, 1) .25s both;
-    }
-    .spot-hero .stat-strip span { animation: riseIn .4s ease both; }
-    .spot-hero .stat-strip span:nth-child(1) { animation-delay: .5s; }
-    .spot-hero .stat-strip span:nth-child(2) { animation-delay: .57s; }
-    .spot-hero .stat-strip span:nth-child(3) { animation-delay: .64s; }
-    .spot-hero .stat-strip span:nth-child(4) { animation-delay: .71s; }
-    .step-2 { animation: riseIn .45s ease .8s both; }
-    .st-key-activity_pick { animation: riseIn .45s ease .88s both; }
-    .groove { animation: riseIn .45s ease .96s both; }
-    .groove-band { animation-delay: 1.1s; }
-    .groove em { animation-delay: 1.55s; }
-    .step-3 { animation: riseIn .45s ease 1.15s both; }
-    [class*="st-key-choice_"] { animation: riseIn .6s cubic-bezier(.2, .7, .3, 1) both; }
-    .st-key-choice_rating { animation-delay: 1.25s; }
-    .st-key-choice_explore { animation-delay: 1.37s; }
-    .st-key-choice_window { animation-delay: 1.49s; }
-    /* Then each instrument puts itself together. */
-    .dial i { animation: fadeIn .2s ease both; animation-delay: calc(1.6s + var(--n) * .045s); }
-    .dial-needle, .dial::after, .dial-read { animation: fadeIn .4s ease 2.1s both; }
-    .grid > span { animation: fadeIn .3s ease both; animation-delay: calc(1.7s + var(--c) * .04s); }
-    .day { animation: riseIn .3s ease both; animation-delay: calc(1.8s + var(--d) * .035s); }
-    .days-frame { animation: fadeIn .4s ease 2.4s both; }
-}
-</style>
-"""
 
 
 def dial_face():
@@ -2960,8 +2576,7 @@ def grid_face():
 def days_face():
     """Plan a trip: two weeks, a frame stepping along them."""
     return '<div class="days">' + "".join(
-        f'<span class="day" style="--d:{day}"><small>{letter}</small><i></i></span>'
-        for day, letter in enumerate("MTWTFSS" * 2)
+        f'<span class="day"><small>{letter}</small><i></i></span>' for letter in "MTWTFSS" * 2
     ) + '<span class="days-frame"><span></span></span></div>'
 
 
@@ -2986,67 +2601,44 @@ def groove_ruler(low, high, note):
     )
 
 
-def step_label(number, text):
-    """A numbered step heading, with the landing's badges."""
-    st.html(f'<div class="step-label step-{number}"><b>{number}</b>{text}</div>')
-
-
-def sport_changed():
-    """A new sport redraws the screen in place, without the build-up."""
-    st.session_state["start_quiet"] = True
+def step_label(text):
+    st.html(f'<div class="step-label">{text}</div>')
 
 
 if st.session_state["mode"] is None:
-    if not st.session_state.pop("start_quiet", False):
-        st.html(START_BUILD_CSS)
     spot_col, map_col = st.columns([7, 5], gap="large", vertical_alignment="center")
     with spot_col:
         st.html(
-            '<div class="hero spot-hero">'
-            '<div class="hero-eyebrow spot-eyebrow"><b>1</b>Your spot</div>'
-            f'<div class="hero-title reveal">{reveal(html.escape(LOCATION_NAME))}</div>'
-            '<hr class="accent-rule">'
-            '<div class="stat-strip">'
-            f"<span><b>{abs(LATITUDE):.2f}°{'N' if LATITUDE >= 0 else 'S'}, "
-            f"{abs(LONGITUDE):.2f}°{'E' if LONGITUDE >= 0 else 'W'}</b></span>"
-            f"<span><b>{data_start.year}–{data_end.year}</b> hourly</span>"
-            f"<span>local time <b>{LOCAL_TZ}</b></span>"
-            + (
-                f"<span>{STATION_NAMES[spot['source']]} <b>{STATION}</b> · "
-                f"{spot['height']:.0f} m</span>"
-                if STATION else f"<span>source <b>{MODEL_NAMES[SOURCE]}</b></span>"
-            )
+            '<div class="hero">'
+            f'<div class="hero-title">{html.escape(LOCATION_NAME)}</div>'
+            f'<div class="hero-facts">{coords_label(LATITUDE, LONGITUDE)} · '
+            f"{data_start.year}–{data_end.year}, hourly · {LOCAL_TZ} · "
+            + (f"{STATION_NAMES[spot['source']]} {STATION}, {spot['height']:.0f} m"
+               if STATION else MODEL_NAMES[SOURCE])
             + "</div></div>"
         )
-        step_label(2, "What are you sailing?")
+        step_label("What are you sailing?")
         st.session_state["activity"] = pick(
             st.segmented_control(
                 "What are you sailing?", list(ACTIVITIES),
                 default=st.session_state["activity"],
                 format_func=lambda name: f"{ACTIVITIES[name]['icon']} {name}",
                 key="activity_pick", label_visibility="collapsed",
-                on_change=sport_changed,
             ),
             st.session_state["activity"],
         )
         chosen = st.session_state["activity"]
         groove_low, groove_high = ACTIVITIES[chosen]["groove"]
         if can_score(chosen):
-            note = (
-                f"Scoring and the speed bands use {groove_low}–{groove_high} kt as the "
-                "range worth going out in."
-            )
+            note = f"Counts {groove_low}–{groove_high} kt as sailable. Change it in the filter."
         else:
-            note = (
-                f"{chosen} counts every day from {groove_low} to {groove_high} kt, so "
-                "it is for exploring only. Pick a sport to rate the spot."
-            )
+            note = "Counts every day, so there is nothing to rate. Pick a sport to rate the spot."
         st.html(groove_ruler(groove_low, groove_high, note))
     with map_col:
         locator_map(LATITUDE, LONGITUDE, key="start_map", height=340, cell=CELL)
 
-    step_label(3, "What do you want to know?")
-    for column, (target, kicker, title, blurb, action) in zip(
+    step_label("What do you want to know?")
+    for column, (target, title, blurb, action) in zip(
         st.columns(3, gap="medium"), CHOICES
     ):
         locked = target == "rating" and not can_score(chosen)
@@ -3057,14 +2649,12 @@ if st.session_state["mode"] is None:
         with column.container(border=True, key=f"choice_{target}"):
             st.html(
                 f'<div class="choice-face" aria-hidden="true">{FACES[target]()}</div>'
-                f'<div class="choice-text"><div class="choice-kicker">{kicker}</div>'
-                f'<div class="choice-title">{title}</div>'
+                f'<div class="choice-text"><div class="choice-title">{title}</div>'
                 f'<div class="choice-blurb">{blurb}</div>{lock_note}</div>'
             )
             if st.button(action, key=f"pick_{target}", width="stretch", disabled=locked):
                 st.session_state["mode"] = target
                 st.session_state.pop("last_mode", None)
-                st.session_state["rating_fresh"] = target == "rating"
                 # The trip planner starts from its first question every time.
                 st.session_state["trip_step"] = 0
                 st.rerun()
@@ -3492,33 +3082,23 @@ ANSWER_CSS = """
 /* Room for the calendar: three months side by side when it is open. */
 .st-key-trip_page:has([class*="_calendar"]) { max-width: 1180px; }
 .st-key-trip_result { max-width: 1000px; }
-.answer-eyebrow {
-    font-size: .7rem; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
-    color: #2dd4bf;
-}
-
-/* The one number, counting up to itself. "\\3c" is "<": see --tone. */
-@property --num { syntax: "\\3c integer>"; inherits: false; initial-value: 0; }
-@keyframes countUp { from { --num: 0; } to { --num: var(--to); } }
-.answer-head { margin: 1.1rem 0 1.3rem; animation: riseIn .5s ease both; }
+.answer-head { margin: 1.1rem 0 1.3rem; }
 .answer-big { display: flex; align-items: baseline; gap: .2rem .8rem; flex-wrap: wrap; margin-top: .4rem; }
 .answer-num {
     font-size: clamp(3.4rem, 8vw, 5.6rem); font-weight: 800; line-height: .95;
     letter-spacing: -.05em; color: #2dd4bf; font-variant-numeric: tabular-nums;
 }
-.answer-num.count { counter-reset: num var(--num); animation: countUp 1.6s cubic-bezier(.16, .8, .3, 1) .15s both; }
-.answer-num.count::after { content: counter(num); }
 .answer-unit { font-size: clamp(1.3rem, 2.6vw, 1.9rem); font-weight: 700; letter-spacing: -.02em; color: #e7ebf3; }
 .answer-sub { max-width: 64ch; margin-top: .6rem; font-size: .98rem; line-height: 1.5; color: #a7b1c4; }
 .answer-sub b { color: #e7ebf3; }
 
 .chapter-lead {
-    margin-top: 1.2rem; font-size: clamp(1.45rem, 2.8vw, 2rem); font-weight: 800;
-    line-height: 1.15; letter-spacing: -.03em; color: #e7ebf3; animation: riseIn .45s ease both;
+    margin-top: 1.2rem; font-size: clamp(1.3rem, 2.4vw, 1.7rem); font-weight: 700;
+    line-height: 1.2; letter-spacing: -.01em; color: #e7ebf3;
 }
 .chapter-sub {
     max-width: 66ch; margin: .45rem 0 1.3rem; font-size: .95rem; line-height: 1.55;
-    color: #a7b1c4; animation: riseIn .45s ease .08s both;
+    color: #a7b1c4;
 }
 .chapter-sub b { color: #e7ebf3; }
 /* Orange and blue stepped to sit in the dark-mode lightness band and stay
@@ -3528,7 +3108,6 @@ ANSWER_CSS = """
     content: ""; display: inline-block; width: .6rem; height: .6rem; margin-right: .45rem;
     border-radius: 50%; background: var(--c);
 }
-@keyframes dotOn { from { background: #181d29; transform: scale(.3); } }
 
 /* Days as dots: a row a month, or a row a year. They light up in order. */
 /* Dots stay day-sized however few there are, and shrink only to fit. */
@@ -3536,16 +3115,12 @@ ANSWER_CSS = """
 .dot-row {
     display: grid; grid-template-columns: 2.6rem minmax(0, max-content) 2rem;
     justify-content: start; align-items: center; gap: .7rem;
-    animation: riseIn .4s ease both; animation-delay: calc(var(--r) * 30ms);
+
 }
 .dot-label { font-size: .78rem; font-weight: 600; color: #8a94a8; font-variant-numeric: tabular-nums; }
 .dot-row.marked .dot-label, .dot-row.marked .dot-count { color: #2dd4bf; }
 .dot-cells { display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 16px)); gap: 3px; }
 .dot-cells i { aspect-ratio: 1; border-radius: 50%; background: #181d29; }
-/* --lag holds the dots back until the block they sit in has arrived. */
-.dot-cells i.g {
-    animation: dotOn .4s ease both; animation-delay: calc(var(--k) + var(--lag, .45s));
-}
 .dot-cells i.g { background: #14b8a6; }
 .dot-count { font-size: .8rem; font-weight: 700; text-align: right; color: #e7ebf3; font-variant-numeric: tabular-nums; }
 
@@ -3556,15 +3131,12 @@ ANSWER_CSS = """
 .spot-row {
     display: grid; grid-template-columns: minmax(0, 13rem) minmax(0, 1fr) 8.5rem;
     align-items: center; gap: .9rem; font-size: .88rem;
-    animation: riseIn .4s ease both; animation-delay: calc(var(--r) * 45ms);
 }
 .spot-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #c3cbda; }
 .spot-row.here .spot-name { font-weight: 700; color: #2dd4bf; }
 .spot-bar { height: 10px; border-radius: 5px; background: #12161f; overflow: hidden; }
 .spot-bar i {
     display: block; width: var(--v); height: 100%; border-radius: 5px; background: #5b6478;
-    transform-origin: left; animation: bandGrow .7s cubic-bezier(.2, .7, .3, 1) both;
-    animation-delay: calc(var(--r) * 45ms + .2s);
 }
 .spot-row.here .spot-bar i { background: #14b8a6; }
 .spot-num { text-align: right; font-weight: 600; color: #e7ebf3; font-variant-numeric: tabular-nums; }
@@ -3573,12 +3145,12 @@ ANSWER_CSS = """
     .spot-bar { grid-column: 1 / -1; }
 }
 
-/* The trip planner: blocks arrive one after another, then the others. */
+/* The trip planner. */
 .trip-title {
-    margin-top: .45rem; font-size: clamp(2.1rem, 4.6vw, 3.3rem); font-weight: 800;
-    line-height: 1.05; letter-spacing: -.04em;
+    margin-top: .45rem; font-size: clamp(1.8rem, 3.6vw, 2.6rem); font-weight: 700;
+    line-height: 1.1; letter-spacing: -.02em;
 }
-.trip-block { margin-top: 1.5rem; animation: riseIn .55s ease both; }
+.trip-block { margin-top: 1.5rem; }
 .trip-rose .rose-drawing { max-width: 250px; }
 .band {
     display: flex; gap: 2px; max-width: 620px; height: 14px; margin-top: 1rem;
@@ -3586,22 +3158,17 @@ ANSWER_CSS = """
 }
 .band i {
     display: block; height: 100%; transform-origin: left;
-    animation: bandGrow .55s cubic-bezier(.2, .7, .3, 1) both;
-    animation-delay: calc(var(--lag, 0s) + var(--d) * .3s);
+
+
 }
 .legend b { color: #e7ebf3; }
 
 /* The way down to the comparison, under the trip's title. */
 .jump {
-    display: inline-flex; align-items: center; gap: .55rem; margin-top: 1rem;
-    padding: .5rem 1.1rem; border: 1px solid rgba(45, 212, 191, .65); border-radius: 999px;
-    background: rgba(45, 212, 191, .1); color: #fbbf24 !important;
-    font-size: .92rem; font-weight: 700; text-decoration: none !important;
-    animation: riseIn .5s ease .5s both; transition: background .2s ease, border-color .2s ease;
+    display: inline-block; margin-top: .7rem; color: #2dd4bf !important;
+    font-size: .95rem; font-weight: 600; text-decoration: none !important;
 }
-.jump:hover { background: rgba(45, 212, 191, .2); border-color: #2dd4bf; }
-.jump span { transition: transform .2s ease; }
-.jump:hover span { transform: translateY(3px); }
+.jump:hover { text-decoration: underline !important; }
 #compare { scroll-margin-top: 7rem; }
 
 /* The comparison: a panel of its own, then a card per spot, best first. */
@@ -3614,7 +3181,7 @@ ANSWER_CSS = """
 .cmp-verdict b { color: #2dd4bf; }
 [class*="st-key-cmp_"] {
     padding: 1.05rem 1.15rem 1.1rem !important; border: 1px solid #273043; border-radius: 10px;
-    background: #10141c; animation: riseIn .5s cubic-bezier(.2, .7, .3, 1) both;
+    background: #10141c;
 }
 [class*="st-key-cmp_top"] { border-color: #2dd4bf; }
 /* A chosen spot and its remove button share one line; the name wraps. */
@@ -3640,10 +3207,6 @@ ANSWER_CSS = """
 .cmp-facts { display: grid; gap: .32rem; font-size: .85rem; color: #a7b1c4; }
 .cmp-facts b { color: #e7ebf3; }
 
-@media (prefers-reduced-motion: reduce) {
-    .dot-cells i, .spot-bar i, .band i { animation: none !important; }
-    .answer-num.count { animation: none; counter-reset: num var(--to); }
-}
 </style>
 """
 
@@ -3684,23 +3247,14 @@ def year_rows(days, dates):
 
 
 def dot_rows(rows):
-    """Days as dots that light up in reading order. Each row: its label, the
-    kind of each day ('g' or ''), its count, a hover note, and whether
-    to mark it out."""
-    lit = sum(bool(kind) for _, kinds, *_ in rows for kind in kinds)
-    pace = min(4.0, 1400 / max(lit, 1))   # ms between dots, so it never drags
+    """Days as dots. Each row: its label, the kind of each day ('g' or ''),
+    its count, a hover note, and whether to mark it out."""
     widest = max(len(kinds) for _, kinds, *_ in rows)
-    order, drawn = 0, []
-    for index, (label, kinds, count, note, marked) in enumerate(rows):
-        cells = []
-        for kind in kinds:
-            if kind:
-                cells.append(f'<i class="{kind}" style="--k:{order * pace:.0f}ms"></i>')
-                order += 1
-            else:
-                cells.append("<i></i>")
+    drawn = []
+    for label, kinds, count, note, marked in rows:
+        cells = [f'<i class="{kind}"></i>' if kind else "<i></i>" for kind in kinds]
         drawn.append(
-            f'<div class="dot-row{" marked" if marked else ""}" style="--r:{index}" '
+            f'<div class="dot-row{" marked" if marked else ""}" '
             f'title="{html.escape(note)}"><span class="dot-label">{label}</span>'
             f'<span class="dot-cells">{"".join(cells)}</span>'
             f'<span class="dot-count">{count}</span></div>'
@@ -3723,7 +3277,7 @@ def best_hours(pct, hours, length=3):
 
 def rose_drawing(degrees):
     """Where the wind comes from as sixteen petals, each as long as its share
-    of the hours, growing out from the middle."""
+    of the hours."""
     sectors = np.floor(((np.asarray(degrees) + 11.25) % 360) / 22.5).astype(int)
     share = np.bincount(sectors, minlength=16) / len(sectors)
     top = share.max()
@@ -3741,7 +3295,7 @@ def rose_drawing(degrees):
         petals.append(
             f'<path d="M{at(16, first)} L{at(outer, first)} A{outer:.1f} {outer:.1f} 0 0 1 '
             f'{at(outer, last)} L{at(16, last)} A16 16 0 0 0 {at(16, first)} Z" '
-            f'fill="{colour}" style="animation-delay:{.15 + sector * .04:.2f}s"/>'
+            f'fill="{colour}"/>'
         )
     rings = "".join(
         f'<circle cx="100" cy="100" r="{radius}" fill="none" stroke="#273043"/>'
@@ -3753,13 +3307,7 @@ def rose_drawing(degrees):
         f'dominant-baseline="central">{letter}</text>'
         for letter, x, y in (("N", 100, -4), ("E", 204, 100), ("S", 100, 204), ("W", -4, 100))
     )
-    motion = (
-        "<style>path{transform-origin:100px 100px;"
-        "animation:grow .8s cubic-bezier(.2,.7,.3,1) both}"
-        "@keyframes grow{from{transform:scale(.15);opacity:0}}"
-        "@media (prefers-reduced-motion:reduce){path{animation:none}}</style>"
-    )
-    return svg_image(motion + rings + "".join(petals) + letters, "-16 -16 232 232", "rose-drawing")
+    return svg_image(rings + "".join(petals) + letters, "-16 -16 232 232", "rose-drawing")
 
 
 # --- Explore: the spot at a glance -----------------------------------------
@@ -3925,11 +3473,7 @@ if st.session_state["mode"] == "explore":
     years_text = f"{recent.index.min().year}–{recent.index.max().year}"
     hours_text = "all day" if hours == (0, 23) else f"{hours[0]:02d}:00–{hours[1]:02d}:59"
 
-    st.html(
-        f'<div class="hero"><div class="hero-eyebrow">Explore · {activity}</div>'
-        f'<div class="hero-title reveal">{reveal(html.escape(LOCATION_NAME))}</div>'
-        '<hr class="accent-rule"></div>'
-    )
+    st.html(f'<div class="hero"><div class="hero-title">{html.escape(LOCATION_NAME)}</div></div>')
     st.caption(
         f"{years_text} · your hours on the water {hours_text}, local time · "
         f"data: {SOURCE_CREDIT} · more under Show more, in the panel on the left"
@@ -4379,12 +3923,10 @@ if st.session_state["mode"] == "window":
         days = outlook["days"]
         recorded = len(days) and outlook["knots"] is not None
         st.html(
-            '<div class="answer-head"><div class="answer-eyebrow">What to expect</div>'
-            '<div class="trip-title reveal">'
-            + reveal(f"{html.escape(names[where])} · {dates_label(dates)}") + "</div>"
+            '<div class="answer-head"><div class="trip-title">'
+            f"{html.escape(names[where])} · {dates_label(dates)}</div>"
             # Straight down to the comparison, which waits at the end.
-            + ('<a class="jump" href="#compare">Compare with your other spots <span>↓</span></a>'
-               if recorded else "")
+            + ('<a class="jump" href="#compare">Compare with other spots ↓</a>' if recorded else "")
             + "</div>"
         )
         if not recorded:
@@ -4394,10 +3936,7 @@ if st.session_state["mode"] == "window":
 
         # Your days: how many bring your wind, and in every year on record.
         typical = typical_days(days, length)
-        counted = (
-            f'<span class="answer-num count" style="--to:{typical}"></span>'
-            if isinstance(typical, int) else f'<span class="answer-num">{typical}</span>'
-        )
+        counted = f'<span class="answer-num">{typical}</span>'
         years_text = f"{days.index.min().year}–{days.index.max().year}"
         rows = year_rows(days, dates)
         record = ""
@@ -4423,7 +3962,7 @@ if st.session_state["mode"] == "window":
                 ])
             )
         st.html(
-            '<div class="trip-block" style="--lag:.8s">'
+            '<div class="trip-block">'
             f'<div class="answer-big">{counted}<span class="answer-unit">of {length} days</span>'
             f'</div><div class="answer-sub">with <b>{wind_words(wind)}</b> for {lasting} h in a '
             f"row {within}, in a typical year: {html.escape(percent(days['good'].mean() * 100))}"
@@ -4437,7 +3976,7 @@ if st.session_state["mode"] == "window":
         direction = outlook["direction"]
         text_col, rose_col = st.columns([3, 2], gap="large", vertical_alignment="center")
         text_col.html(
-            '<div class="trip-block" style="animation-delay:1.5s;--lag:1.8s">'
+            '<div class="trip-block">'
             f'<div class="chapter-lead">Usually {low:.0f}–{high:.0f} kt, '
             f"a {beaufort(middle)}</div>"
             f'<div class="chapter-sub">Of your hours on the water, <b>{bands["good"]}%</b> '
@@ -4450,14 +3989,14 @@ if st.session_state["mode"] == "window":
         )
         if len(direction):
             rose_col.html(
-                '<div class="trip-block trip-rose" style="animation-delay:1.7s">'
+                '<div class="trip-block trip-rose">'
                 + rose_drawing(direction) + "</div>"
             )
 
         # The air, and what that means you wear.
         if outlook["air"] is not None:
             st.html(
-                '<div class="trip-block" style="animation-delay:2.1s">'
+                '<div class="trip-block">'
                 f'<div class="chapter-lead">Around {outlook["air"]:.0f} °C in your hours</div>'
                 '<div class="chapter-sub">Air, not water, on average over your dates. What to '
                 f"wear: <b>{kit_for(outlook['air'])}</b>.</div></div>"
@@ -4612,34 +4151,11 @@ if st.session_state["mode"] == "rating":
             activity, wind, lasting, hours, shift, feels,
         )
 
-    fresh = st.session_state.pop("rating_fresh", False)
-    stars = round(rating["overall"] / 2)
-    hero = st.empty()
-
-    def draw_hero(value):
-        hero.html(
-            f'<div class="rating-hero">'
-            f'<div class="rating-score">{value:.1f}<span style="font-size:1.6rem;'
-            f'opacity:.55"> / 10</span></div>'
-            '<div class="rating-stars">'
-            + "".join(
-                f"<span>{'★' if index < stars else '☆'}</span>" for index in range(5)
-            )
-            + "</div>"
-            + "</div>"
-        )
-
-    if fresh:
-        # Count the score up so the verdict lands rather than just appearing.
-        for step in np.linspace(0, rating["overall"], 24):
-            draw_hero(float(step))
-            time.sleep(0.022)
-    draw_hero(rating["overall"])
-
     st.html(
-        '<div class="reveal" style="font-size:1.15rem;font-weight:600">'
-        + reveal(f"{LOCATION_NAME} — {activity.lower()}", delay=0.15)
-        + "</div>"
+        f'<div class="rating-hero"><div class="rating-score">{rating["overall"]:.1f}'
+        '<span style="font-size:1.6rem;opacity:.55"> / 10</span></div></div>'
+        f'<div style="font-size:1.15rem;font-weight:600">{html.escape(LOCATION_NAME)} · '
+        f"{activity}</div>"
     )
     st.caption(
         f"Scored on {rating['years']}: {wind_words(wind)} for {lasting} h in a row"
@@ -4660,13 +4176,8 @@ if st.session_state["mode"] == "rating":
         for name, (score, detail) in rating["parts"].items():
             label, bar = st.columns([2, 5], vertical_alignment="center")
             label.markdown(f"**{name}**  \n<small>{detail}</small>", unsafe_allow_html=True)
-            meter = bar.empty()
-            if fresh:
-                for step in np.linspace(0, score, 12):
-                    # st.progress rejects numpy scalars, so hand it a plain float.
-                    meter.progress(float(step) / 10, text=f"{step:.1f} / 10")
-                    time.sleep(0.012)
-            meter.progress(float(score) / 10, text=f"{score:.1f} / 10")
+            # st.progress rejects numpy scalars, so hand it a plain float.
+            bar.progress(float(score) / 10, text=f"{score:.1f} / 10")
 
     st.divider()
     highlights = st.columns(4)
@@ -4714,9 +4225,7 @@ if st.session_state["mode"] == "rating":
             + ", ".join(
                 f"{name.lower()} ({weight:.0%})" for name, weight in RATING_WEIGHTS.items()
             )
-            + ". Whether the wind is any good counts most; how much it wanders "
-            "through the day counts least. These weights are my choice — the four "
-            "parts are shown above so you can weigh them yourself."
+            + ". The four parts are shown above, so you can weigh them yourself."
         )
     small_print()
     st.stop()
