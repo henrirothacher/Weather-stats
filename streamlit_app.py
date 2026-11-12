@@ -1359,21 +1359,20 @@ def pick(value, fallback):
     return fallback if value is None else value
 
 
-def remembered(widget, label, *args, key, default, start="value", memory=None, **options):
+def remembered(widget, label, *args, key, default, start="value", **options):
     """Draw a widget whose choice outlives the views that hide it.
 
     Streamlit forgets a widget's state once it is not drawn, so the value is
     copied aside every run and handed back as the widget's own starting value
     (`start` names that argument). Not put back through session state: a
     widget drawn from there alone shows its blank default, and a range slider
-    even falls back to its full span and then reports that span back.
-    `memory` lets two widgets share one value; an emptied choice keeps it."""
-    memory = memory or f"kept_{key}"
-    kept_value = st.session_state.get(memory, default)
+    even falls back to its full span and then reports that span back. An
+    emptied choice keeps the last one."""
+    kept_value = st.session_state.get(f"kept_{key}", default)
     value = widget(label, *args, key=key, **{start: kept_value}, **options)
     if value is None:
         value = kept_value
-    st.session_state[memory] = value
+    st.session_state[f"kept_{key}"] = value
     return value
 
 
