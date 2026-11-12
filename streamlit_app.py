@@ -1797,6 +1797,7 @@ MAP_CHROME_CSS = """
     border: 2px solid rgba(255,255,255,.9);
     box-shadow: 0 0 0 4px rgba(125,211,252,.22), 0 2px 6px rgba(0,0,0,.45);
 }
+.spot-dot.chosen { background: #fbbf24; }
 .spot-dot.picked { background: #2dd4bf; box-shadow: 0 0 0 5px rgba(45,212,191,.25), 0 2px 8px rgba(0,0,0,.5); }
 /* A station you have not downloaded: present, but quieter than your spots. */
 .spot-dot.idle {
@@ -1906,9 +1907,10 @@ SPOT_HOVER_SCRIPT = """
 """
 
 
-def dot_marker(latitude, longitude, tooltip, picked=False, idle=False):
+def dot_marker(latitude, longitude, tooltip, picked=False, idle=False, chosen=False):
     """A designed dot rather than folium's default pin."""
-    classes = "spot-dot picked" if picked else "spot-dot idle" if idle else "spot-dot"
+    classes = ("spot-dot picked" if picked else "spot-dot idle" if idle
+               else "spot-dot chosen" if chosen else "spot-dot")
     return folium.Marker(
         [latitude, longitude],
         tooltip=tooltip,
@@ -2500,15 +2502,19 @@ def loading_screen(note):
             f'<div class="loading-note">{note}</div>'
         )
         slot = st.empty()
+    return bar_in(slot), slot.empty
 
+
+def bar_in(slot):
+    """A progress bar drawn into `slot`: `show(fraction, text)` fills it that
+    far, or sweeps it while `fraction` is None."""
     def show(fraction, text):
         fill = "" if fraction is None else f' style="width:{fraction * 100:.0f}%"'
         slot.html(
             f'<div class="loading-bar{" unknown" if fraction is None else ""}"><i{fill}></i></div>'
             f'<div class="loading-text">{html.escape(text)}</div>'
         )
-
-    return show, slot.empty
+    return show
 
 
 def fetch_now(fetch, what, clear, hint=None):
@@ -3600,41 +3606,23 @@ ANSWER_CSS = """
 
 /* The comparison: a panel of its own, then a card per spot, best first. */
 .st-key-compare_panel {
-    margin-top: 2.4rem; padding: 1.7rem 1.8rem 1.9rem !important;
-    border: 1px solid rgba(45, 212, 191, .55); border-radius: 14px;
-    background: linear-gradient(180deg, rgba(45, 212, 191, .08), transparent 260px), #0c1017;
-    box-shadow: 0 18px 50px rgba(0, 0, 0, .3);
-    animation: riseIn .6s ease 2.3s both;
+    margin-top: 2.4rem; padding: 1.5rem 1.6rem 1.7rem !important;
+    border: 1px solid #273043; border-radius: 10px; background: #0c1017;
 }
-.cmp-title {
-    margin-top: .35rem; font-size: clamp(1.7rem, 3.4vw, 2.4rem); font-weight: 800;
-    line-height: 1.1; letter-spacing: -.035em; color: #e7ebf3;
-}
-.cmp-title em { font-style: normal; color: #2dd4bf; }
-.cmp-verdict {
-    margin: .4rem 0 .3rem; font-size: 1.15rem; font-weight: 700; color: #e7ebf3;
-    animation: riseIn .4s ease both;
-}
+.cmp-title { font-size: 1.6rem; font-weight: 700; line-height: 1.15; color: #e7ebf3; }
+.cmp-verdict { margin: .4rem 0 .3rem; font-size: 1.1rem; font-weight: 600; color: #e7ebf3; }
 .cmp-verdict b { color: #2dd4bf; }
-.cmp-hint { margin-top: .2rem; font-size: .9rem; color: #8a94a8; }
 [class*="st-key-cmp_"] {
     padding: 1.05rem 1.15rem 1.1rem !important; border: 1px solid #273043; border-radius: 10px;
     background: #10141c; animation: riseIn .5s cubic-bezier(.2, .7, .3, 1) both;
 }
-[class*="st-key-cmp_top"] {
-    border-color: rgba(45, 212, 191, .7);
-    background: linear-gradient(180deg, rgba(45, 212, 191, .12), transparent 70%), #10141c;
-}
-.cmp-tags { display: flex; align-items: center; gap: .55rem; min-height: 1.3rem; }
-.cmp-tags span {
-    font-size: .62rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
-    color: #8a94a8;
-}
-.cmp-tags .rank {
-    display: inline-grid; place-items: center; width: 1.35rem; height: 1.35rem;
-    border: 1px solid #273043; border-radius: 4px; background: #12161f;
-    font-size: .7rem; letter-spacing: 0; color: #fbbf24;
-}
+[class*="st-key-cmp_top"] { border-color: #2dd4bf; }
+/* A chosen spot and its remove button share one line; the name wraps. */
+[class*="st-key-slot_row_"] { flex-wrap: nowrap !important; }
+[class*="st-key-slot_row_"] > div:first-child { flex: 1 1 auto !important; min-width: 0 !important; }
+[class*="st-key-slot_row_"] > div:not(:first-child) { flex: 0 0 auto !important; }
+.cmp-tags { display: flex; align-items: center; gap: .55rem; min-height: 1.3rem; font-size: .78rem; color: #8a94a8; }
+.cmp-tags .rank { font-weight: 700; color: #e7ebf3; }
 .cmp-tags .lead { color: #2dd4bf; }
 .cmp-name {
     margin-top: .45rem; font-size: 1.12rem; font-weight: 700; line-height: 1.25; color: #e7ebf3;
@@ -4174,10 +4162,151 @@ def band_bar(bands, legend=True):
 
 def swap_trip(entry, key, where, chosen):
     """Go to a compared spot instead, the whole app with you: the one you
-    leave joins the others. A callback, as only one can reach the picker
-    before it is drawn."""
+    leave joins the others."""
     enter_spot({k: v for k, v in entry.items() if k != "path"})
     st.session_state["trip_compare"] = [where, *[other for other in chosen if other != key]]
+
+
+def add_compare(widget):
+    """A spot picked in an empty slot joins the others; the slot clears."""
+    key, st.session_state[widget] = st.session_state[widget], None
+    chosen = st.session_state.get("trip_compare", [])
+    if key and key not in chosen and len(chosen) < COMPARE_UP_TO:
+        st.session_state["trip_compare"] = [*chosen, key]
+
+
+def drop_compare(key):
+    st.session_state["trip_compare"] = [
+        other for other in st.session_state.get("trip_compare", []) if other != key
+    ]
+
+
+def nearest_spots(spots, where, others):
+    """The COMPARE_UP_TO of `others` nearest to `where`: the comparison's
+    first look, before you have picked any."""
+    if not others:
+        return []
+    km = km_from(spots[where]["lat"], spots[where]["lon"],
+                 np.array([spots[key]["lat"] for key in others]),
+                 np.array([spots[key]["lon"] for key in others]))
+    return [others[index] for index in np.argsort(km)[:COMPARE_UP_TO]]
+
+
+def compare_slots(chosen, others, spots, names):
+    """A slot for each spot beside yours: a chosen one, with a way to take
+    it off, or an empty one to fill from your list or the map."""
+    free = [key for key in others if key not in chosen]
+    for place, column in enumerate(st.columns(COMPARE_UP_TO, gap="small")):
+        with column.container(border=True, key=f"slot_{place}"):
+            if place < len(chosen):
+                key = chosen[place]
+                with st.container(horizontal=True, vertical_alignment="top", gap="small",
+                                  key=f"slot_row_{place}"):
+                    st.markdown(f"**{names[key]}**  \n:gray[{source_credit(spots[key])}]",
+                                width="stretch")
+                    st.button(":material/close:", key=f"slot_drop_{key}", type="tertiary",
+                              help="Take it off", on_click=drop_compare, args=(key,),
+                              width="content")
+            elif free:
+                st.selectbox(
+                    f"Spot {place + 1}", free, index=None, format_func=names.get,
+                    placeholder="Add one of your spots", key=f"slot_add_{place}",
+                    on_change=add_compare, args=(f"slot_add_{place}",),
+                    label_visibility="collapsed",
+                )
+                st.caption("or click the map")
+            else:
+                st.caption("Empty: click the map to add a spot")
+
+
+def compare_map(spots, where, chosen, others, names, new):
+    """Your spots on one map, to set beside this one with a click: yours
+    teal and ringed, the chosen ones amber, the rest grey, and `new`, a spot
+    not downloaded yet, in its cell. The dots are a layer of their own, so a
+    pick swaps them without redrawing the map under them. Returns the key
+    of the spot just clicked, the (lat, lon) of a click on open ground, or
+    None."""
+    lats = np.array([spots[key]["lat"] for key in (where, *others)])
+    lons = np.array([spots[key]["lon"] for key in (where, *others)])
+    chart = base_map(min_zoom=2, world_copy_jump=True)
+    chart.fit_bounds([[lats.min(), lons.min()], [lats.max(), lons.max()]],
+                     padding=(50, 50), max_zoom=8)
+    dots = folium.FeatureGroup(name="spots")
+    dot_marker(lats[0], lons[0], f"{names[where]} · your pick", picked=True).add_to(dots)
+    for key in others:
+        dot_marker(spots[key]["lat"], spots[key]["lon"],
+                   names[key] + (" · beside yours" if key in chosen else ""),
+                   idle=key not in chosen, chosen=key in chosen).add_to(dots)
+    if new:
+        cell = CELL_GRIDS.get(new["source"]) if not new.get("station") else None
+        if cell:
+            folium.Rectangle(
+                bounds=[[new["lat"] - cell / 2, new["lon"] - cell / 2],
+                        [new["lat"] + cell / 2, new["lon"] + cell / 2]],
+                color="#7dd3fc", weight=2, fill=True, fill_opacity=0.25,
+            ).add_to(dots)
+        dot_marker(new["lat"], new["lon"], f"{spot_title(new)} · not downloaded yet").add_to(dots)
+    result = st_folium(chart, height=COMPARE_MAP_HEIGHT, use_container_width=True,
+                       key="compare_map", feature_group_to_add=dots,
+                       returned_objects=["last_clicked", "last_object_clicked",
+                                         "last_object_clicked_count"])
+    clicked = fresh_click(result, "compare_click_seen")
+    if clicked is None:
+        return None
+    # Nearest of all the dots, yours first: a click on yours does nothing.
+    km = km_from(*clicked, lats, lons)
+    nearest = int(np.argmin(km))
+    if km[nearest] > COMPARE_CLICK_KM:
+        return clicked
+    return others[nearest - 1] if nearest else None
+
+
+def spot_at(latitude, longitude):
+    """A spot of this trip's own source at a click, like beside like: the
+    cell there for a model, the nearest station for a station source. None
+    where the source has nothing there."""
+    if STATION:
+        table = meteoswiss_stations() if SOURCE == "meteoswiss" else metar_stations()
+        abbr = km_from(latitude, longitude, table["lat"], table["lon"]).idxmin()
+        row = table.loc[abbr]
+        found = {"lat": float(row["lat"]), "lon": float(row["lon"]), "source": SOURCE,
+                 "station": abbr, "height": float(row["height"]), "name": str(row["name"])}
+    elif SOURCE == "arome" and not in_arome_area(latitude, longitude):
+        return None
+    else:
+        grid = CELL_GRIDS[SOURCE]
+        found = {"lat": snap_to_grid(latitude, grid), "lon": snap_to_grid(longitude, grid),
+                 "source": SOURCE}
+        found["name"] = place_name(found["lat"], found["lon"])
+    known = load_registry().get(spot_key(found), {})
+    return {**found, "zone": timezone_at(found["lat"], found["lon"]),
+            "name": known.get("name") or found["name"]}
+
+
+def fetch_here(entry, show):
+    """Download a spot's record as the loading screen would, behind `show`."""
+    target = spot_path(entry)
+    if entry["source"] == "metar":
+        show(None, "The Iowa Environmental Mesonet is gathering every report...")
+        fetch_metar(entry, target)
+    elif entry["source"] == "meteoswiss":
+        show(None, "Asking MeteoSwiss for the station's files...")
+        fetch_station(entry, target, progress=counting(show, "files"))
+    elif entry["source"] == "arome":
+        show(None, "Asking Open-Meteo for the first year...")
+        fetch_arome(entry, target, progress=counting(show, "years"))
+    else:
+        show(None, "Copernicus is preparing the data: this can take a while...")
+        fetch_era5(entry, target, date(date.today().year - 19, 1, 1))
+
+
+NEW_SPOT_NOTES = {
+    "metar": "Every report the airport has sent; no account needed. About a minute.",
+    "meteoswiss": "Every hour the station has measured; no account needed. A minute or two.",
+    "arome": f"Every hour since {AROME_SINCE:%B %Y} of the 1.5 km model; no account "
+             "needed, a year at a time.",
+    "era5": "The last twenty years, prepared on Copernicus' side: this can take a while.",
+}
 
 
 def compare_card(name, credit, outlook, length, rank, tags):
@@ -4202,7 +4331,7 @@ def compare_card(name, credit, outlook, length, rank, tags):
             + band_bar(bands, legend=False)
             + f'<div class="cmp-facts">{"".join(f"<span>{fact}</span>" for fact in facts)}</div>'
         )
-    badges = (f'<span class="rank">{rank}</span>' if rank else "") + "".join(
+    badges = (f'<span class="rank">#{rank}</span>' if rank else "") + "".join(
         f'<span class="{"lead" if tag == "Most days" else ""}">{tag}</span>' for tag in tags
     )
     return (
@@ -4338,39 +4467,75 @@ if st.session_state["mode"] == "window":
         # of its own that the button under the title leads down to.
         with st.container(key="compare_panel"):
             st.html(
-                '<div class="answer-eyebrow" id="compare">Compare</div>'
-                f'<div class="cmp-title"><em>{html.escape(names[where])}</em>, or somewhere '
-                'else?</div><div class="chapter-sub">The same dates, wind and hours at your '
-                "other spots, each in its own local time. Pick as many as you like.</div>"
+                '<div class="cmp-title" id="compare">Compare with other spots</div>'
+                '<div class="chapter-sub">Same dates, wind and hours, each spot in its own '
+                "local time.</div>"
             )
             ask_kind(st)
             others = [key for key in comparable(spots) if key != where]
-            # Set through its own key rather than a default, which the picker
-            # ignores once drawn: a swap has to hand it the list it leaves.
-            showing = st.session_state.get("trip_compare")
-            wanted = [key for key in (kept("trip_compare", []) if showing is None else showing)
-                      if key in others]
-            if showing != wanted:
-                st.session_state["trip_compare"] = wanted
-            same_kind = kept("like_with_like", DEFAULT_LIKE_WITH_LIKE)
-            chosen = []
-            if not others:
-                st.html(
-                    f'<div class="cmp-hint">No other {own_kind()[:-1] if same_kind else "spot"} '
-                    "downloaded yet. "
-                    + ("Switch to All spots, or " if same_kind else "") + "pick one on the map.</div>"
-                )
-            else:
-                chosen = st.pills(
-                    "Set beside it", others, selection_mode="multi", key="trip_compare",
-                    # The icon of the source each spot comes from, as on the map screen.
-                    format_func=lambda key: f"{SOURCES[spots[key].get('source', 'era5')].split()[0]} "
-                    f"{names[key]}",
-                ) or []
-            st.session_state["kept_trip_compare"] = chosen
-            if others and not chosen:
-                st.html('<div class="cmp-hint">Pick a spot above to see them side by side, '
-                        "best first.</div>")
+            # The first look brings your nearest spots; after that, your picks.
+            if "trip_compare" not in st.session_state:
+                st.session_state["trip_compare"] = nearest_spots(spots, where, others)
+            chosen = [key for key in st.session_state["trip_compare"] if key in others]
+            chosen = chosen[:COMPARE_UP_TO]
+            st.session_state["trip_compare"] = chosen
+            new = st.session_state.get("compare_new")
+            room = COMPARE_UP_TO - len(chosen)
+            kind = STATION_NAMES[SOURCE] + " station" if STATION else MODEL_NAMES[SOURCE] + " cell"
+            st.caption(
+                (f"Click a dot to add it (room for {COUNT_WORDS[room].lower()} more), "
+                 if room else "Click an amber dot to take it off, ")
+                + f"or click anywhere else to download a new {kind}."
+            )
+            clicked = compare_map(spots, where, chosen, others, names, new)
+            if isinstance(clicked, tuple):
+                found = spot_at(*clicked)
+                if found is None:
+                    st.toast(f"{MODEL_NAMES[SOURCE]} has no data there.", icon=":material/info:")
+                elif spot_key(found) in spots:
+                    clicked = spot_key(found)
+                elif spot_key(found) not in (spot_key(spot), spot_key(new or {"lat": 0, "lon": 0})):
+                    st.session_state["compare_new"] = found
+                    st.rerun()
+            if clicked in others and clicked in chosen:
+                drop_compare(clicked)
+                st.rerun()
+            elif clicked in others and room:
+                st.session_state["trip_compare"] = [*chosen, clicked]
+                st.rerun()
+            elif clicked in others:
+                st.toast(f"Up to {COUNT_WORDS[COMPARE_UP_TO].lower()} spots: take one off first.",
+                         icon=":material/info:")
+            if new:
+                # The spot just clicked, not downloaded yet: fetch it here,
+                # and it joins the comparison.
+                with st.container(border=True, key="compare_new_panel"):
+                    st.markdown(
+                        f"**{spot_title(new)}**  \n:gray[{source_credit(new)} · "
+                        f"{coords_label(new['lat'], new['lon'])} · not downloaded yet. "
+                        f"{NEW_SPOT_NOTES[new['source']]}]"
+                    )
+                    slot = st.empty()
+                    with st.container(horizontal=True):
+                        go = st.button("Download and compare", type="primary",
+                                       icon=":material/download:", key="compare_fetch")
+                        if st.button("Never mind", type="tertiary", key="compare_drop"):
+                            st.session_state.pop("compare_new")
+                            st.rerun()
+                    if go:
+                        try:
+                            fetch_here(new, bar_in(slot))
+                        except Exception as error:
+                            slot.empty()
+                            st.error(f"Could not fetch that spot: {error}")
+                        else:
+                            remember_location(new)
+                            follow(new)
+                            st.session_state.pop("compare_new")
+                            if room:
+                                st.session_state["trip_compare"] = [*chosen, spot_key(new)]
+                            st.rerun()
+            compare_slots(chosen, others, spots, names)
             if chosen:
                 with st.spinner("Reading your other spots..."):
                     outlooks = {key: outlook_at(key) for key in [where, *chosen]}
@@ -4396,23 +4561,23 @@ if st.session_state["mode"] == "window":
                         f"{length} days, against {totals.get(where, 0)} at {bold[where]}."
                     )
                 st.html(f'<div class="cmp-verdict">{verdict}</div>')
-                for row in range(0, len(order), 4):
-                    for column, key in zip(st.columns(4, gap="small"), order[row:row + 4]):
-                        lead = key in leaders and len(leaders) < len(totals)
-                        tags = (["Your pick"] if key == where else []) + (["Most days"] if lead else [])
-                        # Spots on the same count share a place: 1, 1, 3.
-                        rank = (1 + sum(total > totals[key] for total in totals.values())
-                                if key in totals else None)
-                        with column.container(key=f"cmp_{'top_' if lead else ''}{order.index(key)}",
-                                              height="stretch"):
-                            st.html(compare_card(names[key], source_credit(spots[key]),
-                                                 outlooks[key], length, rank, tags))
-                            if key != where:
-                                st.button(
-                                    "Go here instead", key=f"trip_swap_{key}",
-                                    icon=":material/swap_horiz:", width="stretch",
-                                    on_click=swap_trip, args=(spots[key], key, where, chosen),
-                                )
+                # Yours and up to three others: one row.
+                for column, key in zip(st.columns(COMPARE_UP_TO + 1, gap="small"), order):
+                    lead = key in leaders and len(leaders) < len(totals)
+                    tags = (["Your pick"] if key == where else []) + (["Most days"] if lead else [])
+                    # Spots on the same count share a place: 1, 1, 3.
+                    rank = (1 + sum(total > totals[key] for total in totals.values())
+                            if key in totals else None)
+                    with column.container(key=f"cmp_{'top_' if lead else ''}{order.index(key)}",
+                                          height="stretch"):
+                        st.html(compare_card(names[key], source_credit(spots[key]),
+                                             outlooks[key], length, rank, tags))
+                        if key != where:
+                            st.button(
+                                "Go here instead", key=f"trip_swap_{key}",
+                                icon=":material/swap_horiz:", width="stretch",
+                                on_click=swap_trip, args=(spots[key], key, where, chosen),
+                            )
 
         st.divider()
         st.caption(f"Local time at each spot · data at {names[where]}: {source_credit(entry)}")

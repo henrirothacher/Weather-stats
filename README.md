@@ -35,8 +35,9 @@ CC BY 4.0): "Lake Balaton near Tapolca", "Strait of Gibraltar, 26 km N of
 Tangier".
 
 Comparing spots keeps to one kind by default, stations with stations and
-model cells with model cells; a switch opens it to all, in explore's
-filter panel and in the trip planner's comparison.
+model cells with model cells; a switch in the trip planner's comparison
+opens it to all. The comparison starts with your three nearest spots; click
+others on its map, or anywhere else to download a new one there.
 
 A day counts, in the rating, explore and the trip planner alike, when
 your wind holds for your hours in a row, the direction swings no more
