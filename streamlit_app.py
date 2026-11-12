@@ -19,17 +19,17 @@ import pandas as pd
 import requests
 import streamlit as st
 import xarray as xr
-from folium.plugins import MiniMap
 from streamlit_folium import st_folium
 from timezonefinder import TimezoneFinder
 
 st.set_page_config(
     page_title="Wind Atlas · hourly wind history", layout="wide",
-    initial_sidebar_state="expanded",
+    # Open beside the page on a computer, closed over it on a phone.
+    initial_sidebar_state="auto",
 )
 
-# Goes up by 0.1 with every commit pushed to GitHub (2.9 -> 3.0).
-APP_VERSION = "3.0"
+# Goes up by 0.1 with every commit pushed to GitHub (3.0 -> 3.1).
+APP_VERSION = "3.1"
 
 def svg_image(markup, view_box, css_class=""):
     """A drawing for st.html. Its sanitiser drops <svg> outright but lets an
@@ -270,6 +270,18 @@ st.html(
         gap: 1.5rem; background: #0a0d14; border-bottom: 1px solid #1a2030;
     }
     .choice-face > * { zoom: 1.35; }
+    /* Narrower cards, smaller drawings, so the two weeks of Plan a trip
+       always fit. Below 640px the cards stack, one to a row. */
+    @media (max-width: 1299px) {
+        .choice-face { height: 160px; }
+        .choice-face > * { zoom: .95; }
+    }
+    @media (max-width: 999px) { .choice-face > * { zoom: .6; } }
+    @media (max-width: 640px) {
+        .choice-face { height: 120px; }
+        .choice-face > * { zoom: .85; }
+        .choice-text { padding: 1rem 1.2rem 0; }
+    }
     [class*="st-key-choice_"]:has(button:focus-visible) {
         border-color: #2dd4bf !important; box-shadow: 0 0 0 1px #2dd4bf;
     }
@@ -1346,14 +1358,6 @@ def style_figure(fig, *axes):
     return fig
 
 
-def blend(first, second, amount):
-    pair = [
-        round(int(first[i:i + 2], 16) * (1 - amount) + int(second[i:i + 2], 16) * amount)
-        for i in (1, 3, 5)
-    ]
-    return "#{:02x}{:02x}{:02x}".format(*pair)
-
-
 def pick(value, fallback):
     """segmented_control returns None when the user deselects; keep a value."""
     return fallback if value is None else value
@@ -1646,20 +1650,8 @@ def base_map(**options):
 def locator_map(latitude, longitude, key, height=230, cell=GRID):
     """The cell, `cell` degrees across, against the coastline, so you can see
     whether the water you care about is actually water. A station is a
-    point, so it gets no cell: None.
-
-    An offshore cell can sit a thousand miles from the nearest land, where a
-    close view is an empty square of ocean — hence the zoom controls and the
-    world inset, which place the cell when the tiles alone cannot."""
-    local = base_map(
-        location=[latitude, longitude], zoom_start=7,
-        control_scale=True, dragging=True,
-    )
-    MiniMap(
-        tile_layer=folium.TileLayer(MAP_TILES, attr=MAP_ATTR),
-        position="bottomleft", width=104, height=104,
-        zoom_level_offset=-6, toggle_display=True,
-    ).add_to(local)
+    point, so it gets no cell: None. Zoom out to place a cell far offshore."""
+    local = base_map(location=[latitude, longitude], zoom_start=7, dragging=True)
     if cell:
         folium.Rectangle(
             bounds=[
@@ -3114,7 +3106,6 @@ ANSWER_CSS = """
 .dot-cells i.g { background: #14b8a6; }
 .dot-count { font-size: .8rem; font-weight: 700; text-align: right; color: #e7ebf3; font-variant-numeric: tabular-nums; }
 
-.rose-drawing { display: block; width: 100%; max-width: 330px; margin: 0 auto; }
 
 /* The trip planner. */
 .trip-title {
@@ -3122,7 +3113,6 @@ ANSWER_CSS = """
     line-height: 1.1; letter-spacing: -.02em;
 }
 .trip-block { margin-top: 1.5rem; }
-.trip-rose .rose-drawing { max-width: 250px; }
 .band {
     display: flex; gap: 2px; max-width: 620px; height: 14px; margin-top: 1rem;
     border-radius: 7px; overflow: hidden; background: #12161f;
@@ -3239,41 +3229,6 @@ def best_hours(pct, hours, length=3):
     length = min(length, len(span))
     runs = [span[i:i + length] for i in range(len(span) - length + 1)]
     return max(runs, key=lambda run: pct.reindex(run).fillna(0).mean())
-
-
-def rose_drawing(degrees):
-    """Where the wind comes from as sixteen petals, each as long as its share
-    of the hours."""
-    sectors = np.floor(((np.asarray(degrees) + 11.25) % 360) / 22.5).astype(int)
-    share = np.bincount(sectors, minlength=16) / len(sectors)
-    top = share.max()
-
-    def at(radius, angle):
-        return f"{100 + radius * np.sin(angle):.1f} {100 - radius * np.cos(angle):.1f}"
-
-    petals = []
-    for sector, part in enumerate(share):
-        if part == 0:
-            continue
-        outer = 20 + 72 * part / top
-        first, last = np.radians(sector * 22.5 - 9.5), np.radians(sector * 22.5 + 9.5)
-        colour = "#fbbf24" if part == top else blend("#134e4a", "#14b8a6", part / top)
-        petals.append(
-            f'<path d="M{at(16, first)} L{at(outer, first)} A{outer:.1f} {outer:.1f} 0 0 1 '
-            f'{at(outer, last)} L{at(16, last)} A16 16 0 0 0 {at(16, first)} Z" '
-            f'fill="{colour}"/>'
-        )
-    rings = "".join(
-        f'<circle cx="100" cy="100" r="{radius}" fill="none" stroke="#273043"/>'
-        for radius in (16, 56, 92)
-    )
-    letters = "".join(
-        f'<text x="{x}" y="{y}" fill="#8a94a8" font-size="11" font-weight="700" '
-        f'font-family="system-ui, sans-serif" text-anchor="middle" '
-        f'dominant-baseline="central">{letter}</text>'
-        for letter, x, y in (("N", 100, -4), ("E", 204, 100), ("S", 100, 204), ("W", -4, 100))
-    )
-    return svg_image(rings + "".join(petals) + letters, "-16 -16 232 232", "rose-drawing")
 
 
 # --- Explore: the spot at a glance -----------------------------------------
@@ -3568,7 +3523,8 @@ def trip_outlook(path, mtime, zone, years_back, wind, lasting, hours, dates,
     held `lasting` hours in a row on the water, swinging no more than `shift`
     degrees and feeling at least `feels` °C, and over your hours on the water
     how often it was too light, right or too strong, how hard it blew, where
-    it came from when it was right, and how warm the air was."""
+    it came from when it was right, and how warm the air was. "rose" holds
+    where it came from and how hard, hour by hour on the water."""
     frame = load_wind(path, mtime, zone)
     frame, good = flag_hours(frame, lookback_start(frame, years_back), wind, dates, feels)
     on_water = hour_mask(frame.index, hours)
@@ -3584,6 +3540,7 @@ def trip_outlook(path, mtime, zone, years_back, wind, lasting, hours, dates,
         # The middle half of your hours on the water, and its midpoint.
         "knots": np.percentile(knots, [25, 50, 75]).tolist() if len(knots) else None,
         "direction": wind_direction(right["u10"], right["v10"]).to_numpy(),
+        "rose": (heading[on_water].to_numpy(), knots.to_numpy()),
         "hour": good.groupby(frame.index.hour).mean().reindex(range(24)) * 100,
         "air": float(air.mean()) if len(air) else None,
     }
@@ -3899,11 +3856,13 @@ if st.session_state["mode"] == "window":
             + f". Best between <b>{best[0]:02d}:00 and {best[-1]:02d}:59</b>.</div>"
             + band_bar(bands) + "</div>"
         )
-        if len(direction):
-            rose_col.html(
-                '<div class="trip-block trip-rose">'
-                + rose_drawing(direction) + "</div>"
-            )
+        headings, speeds = outlook["rose"]
+        if len(headings):
+            with rose_col:
+                rose = draw_rose(headings, speeds, ACTIVITIES[activity]["ladder"], "knots")
+                st.pyplot(rose, width="stretch")
+                plt.close(rose)
+                st.caption("Where the wind comes from in your hours on these dates.")
 
         # The air, and what that means you wear.
         if outlook["air"] is not None:
