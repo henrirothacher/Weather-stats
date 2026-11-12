@@ -3035,10 +3035,6 @@ def settings(mode):
                    "holds below 10 °C with wind over 4.8 km/h; warmer or calmer, it is "
                    "the air temperature itself. Every hour in a row has to feel at least "
                    "this warm. Any: cold is no bar.")
-    # The trip planner asks this in its own comparison panel instead.
-    if mode == "explore":
-        side.subheader("Compare")
-        ask_kind(side)
     return activity
 
 
@@ -3055,11 +3051,6 @@ def ask_kind(place):
         "the wind where it stands; a model averages a cell, 25 km for ERA5 and 1.5 km for "
         "AROME, which smooths it out.",
     )
-
-
-def own_kind():
-    """What this spot is, said in the plural: stations or model cells."""
-    return "stations" if STATION else "model cells"
 
 
 def comparable(spots):
@@ -3125,25 +3116,6 @@ ANSWER_CSS = """
 .dot-count { font-size: .8rem; font-weight: 700; text-align: right; color: #e7ebf3; font-variant-numeric: tabular-nums; }
 
 .rose-drawing { display: block; width: 100%; max-width: 330px; margin: 0 auto; }
-
-/* Your spots side by side. */
-.spots { display: grid; gap: .55rem; max-width: 820px; }
-.spot-row {
-    display: grid; grid-template-columns: minmax(0, 13rem) minmax(0, 1fr) 8.5rem;
-    align-items: center; gap: .9rem; font-size: .88rem;
-}
-.spot-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #c3cbda; }
-.spot-row.here .spot-name { font-weight: 700; color: #2dd4bf; }
-.spot-bar { height: 10px; border-radius: 5px; background: #12161f; overflow: hidden; }
-.spot-bar i {
-    display: block; width: var(--v); height: 100%; border-radius: 5px; background: #5b6478;
-}
-.spot-row.here .spot-bar i { background: #14b8a6; }
-.spot-num { text-align: right; font-weight: 600; color: #e7ebf3; font-variant-numeric: tabular-nums; }
-@media (max-width: 640px) {
-    .spot-row { grid-template-columns: minmax(0, 1fr) auto; gap: .3rem .8rem; }
-    .spot-bar { grid-column: 1 / -1; }
-}
 
 /* The trip planner. */
 .trip-title {
@@ -3229,11 +3201,6 @@ def years_named(years, total):
     return joined([str(year) for year in sorted(years)])
 
 
-def ordinal(number):
-    suffix = "th" if 11 <= number % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(number % 10, "th")
-    return f"{number}{suffix}"
-
-
 def year_rows(days, dates):
     """Your dates in every year that has all of them, newest first: per day,
     'g' when it brought your wind, '' when not."""
@@ -3311,17 +3278,11 @@ def rose_drawing(degrees):
 
 
 # --- Explore: the spot at a glance -----------------------------------------
-# What the wind does here all year on one screen: four figures, the windy
-# days month by month, and the wind rose of the month you click beside the
-# map. Everything else waits in the sidebar under "Show more", a switch a
-# view, so the page starts simple and grows only as far as you ask.
+# What the wind does here all year on one screen, with no filter to set:
+# the sport picked on the start screen with its own range and the usual
+# hours. Four figures, the windy days month by month beside the wind rose
+# of the month you click, then the day, the years, the air and the numbers.
 
-EXTRAS = {
-    "day": "Through the day",
-    "years": "Year by year",
-    "air": "Air temperature",
-    "numbers": "The numbers",
-}
 MONTHS = [calendar.month_abbr[month] for month in range(1, 13)]
 
 
@@ -3445,23 +3406,12 @@ def air_chart(by_month):
 
 if st.session_state["mode"] == "explore":
     st.html(ANSWER_CSS)
-    activity = settings("explore")
-    # Under the Compare heading settings() ends on, so comparing sits together.
-    compare = remembered(st.sidebar.toggle, "Show your other spots", key="show_spots",
-                         default=False)
-    st.sidebar.subheader("Show more")
-    shown = {
-        key for key, label in EXTRAS.items()
-        if (key != "air" or HAS_TEMP)
-        and remembered(st.sidebar.toggle, label, key=f"show_{key}", default=False)
-    } | ({"spots"} if compare else set())
+    activity = st.session_state["activity"]
     ladder = ACTIVITIES[activity]["ladder"]
-    wind = tuple(kept(f"wind_{activity}", ACTIVITIES[activity]["groove"]))
-    hours = tuple(kept("hours", DEFAULT_HOURS))
-    lasting = kept("lasting", DEFAULT_LASTING)
-    shift = shift_degrees(kept("shift", DEFAULT_SHIFT))
-    feels = feels_degrees(kept("feels", DEFAULT_FEELS)) if HAS_TEMP else None
-    years_back = LOOKBACK[kept("years", DEFAULT_YEARS)]
+    wind = ACTIVITIES[activity]["groove"]
+    hours, lasting = DEFAULT_HOURS, DEFAULT_LASTING
+    shift, feels = shift_degrees(DEFAULT_SHIFT), None
+    years_back = LOOKBACK[DEFAULT_YEARS]
 
     recent = df[df.index.year >= lookback_start(df, years_back)]
     knots = recent["speed"] * MS_TO_KNOTS
@@ -3475,8 +3425,8 @@ if st.session_state["mode"] == "explore":
 
     st.html(f'<div class="hero"><div class="hero-title">{html.escape(LOCATION_NAME)}</div></div>')
     st.caption(
-        f"{years_text} · your hours on the water {hours_text}, local time · "
-        f"data: {SOURCE_CREDIT} · more under Show more, in the panel on the left"
+        f"{activity}: a day counts when {wind_words(wind)} holds {lasting} h in a row, "
+        f"{hours_text} local time · {years_text} · {SOURCE_CREDIT}"
     )
 
     # Four figures: how often, when in the year, when in the day, from where.
@@ -3536,21 +3486,20 @@ if st.session_state["mode"] == "explore":
             st.info("No readings in your hours.")
         locator_map(LATITUDE, LONGITUDE, key="explore_map", height=220, cell=CELL)
 
-    if "day" in shown:
-        st.divider()
-        hourly = knots if month is None else knots[recent.index.month == month]
-        section(f"{when} through the day",
-                "the share of hours that top each speed; shaded, your hours on the water")
-        st.html(band_legend(ladder))
-        st.altair_chart(day_chart(over_bands(hourly, hourly.index.hour, ladder), hours),
-                        width="stretch")
+    st.divider()
+    hourly = knots if month is None else knots[recent.index.month == month]
+    section(f"{when} through the day",
+            "the share of hours that top each speed; shaded, the hours counted")
+    st.html(band_legend(ladder))
+    st.altair_chart(day_chart(over_bands(hourly, hourly.index.hour, ladder), hours),
+                    width="stretch")
 
-    if "years" in shown and len(days):
+    if len(days):
         st.divider()
         section("Year by year", f"the share of days with {wind_words(wind)}, month by month")
         st.altair_chart(year_chart(days), width="stretch")
 
-    if "air" in shown:
+    if HAS_TEMP:
         st.divider()
         air = recent.loc[water, "temp_c"]
         by_month = air.groupby(air.index.month).mean()
@@ -3567,62 +3516,26 @@ if st.session_state["mode"] == "explore":
                "nearest one that does, corrected for the difference in height." if lender else "")
         )
 
-    if "spots" in shown:
-        st.divider()
-        spots = comparable(my_locations(with_record=True))
-        kind = own_kind()[:-1] if kept("like_with_like", DEFAULT_LIKE_WITH_LIKE) else "spot"
-        names = spot_names(spots)
-        rows = []
-        with st.spinner("Counting days at your other spots..."):
-            for key, entry in spots.items():
-                path = entry["path"]
-                found = good_days(path, path.stat().st_mtime, entry["zone"], years_back,
-                                  wind, lasting, hours, shift, feels)
-                rows.append((float(found.mean() * 100) if len(found) else 0.0,
-                             names[key], path == dataset_path))
-        rows.sort(reverse=True)
-        rank = next((place for place, row in enumerate(rows, 1) if row[2]), None)
-        section(
-            "Your other spots" if len(rows) < 2
-            else "The best of your spots" if rank == 1
-            else f"{ordinal(rank)} of your {len(rows)} spots" if rank
-            else f"Your {len(rows)} spots side by side",
-            f"the same wind and hours at every {kind} you have downloaded, "
-            "each in its own local time",
-        )
-        if len(rows) < 2:
-            st.info(f"No other {kind} downloaded yet to compare with. Pick one on the map, "
-                    "or compare with all spots under Compare, in the panel on the left.")
-        else:
-            st.html('<div class="spots">' + "".join(
-                f'<div class="spot-row{" here" if here_spot else ""}" style="--r:{index}">'
-                f'<span class="spot-name" title="{html.escape(name)}">{html.escape(name)}</span>'
-                f'<span class="spot-bar"><i style="--v:{pct:.1f}%"></i></span>'
-                f'<span class="spot-num">{pct / 100 * 365:.0f} days a year</span></div>'
-                for index, (pct, name, here_spot) in enumerate(rows)
-            ) + "</div>")
-
-    if "numbers" in shown:
-        st.divider()
-        section("The numbers", "month by month, over your hours on the water")
-        table = pd.DataFrame({
-            "Month": MONTHS,
-            "Days with your wind": [
-                per_month.get(number, 0) * calendar.monthrange(2001, number)[1]
-                for number in range(1, 13)
-            ],
-            **{f"% over {threshold} kt": month_share[threshold].reindex(range(1, 13)).to_numpy()
-               for threshold in ladder},
-        })
-        # Tall enough for all twelve months without scrolling.
-        st.dataframe(table.round(0), hide_index=True, width="stretch", height=460)
-        st.download_button(
-            "Every day as CSV",
-            days.rename("with_your_wind").rename_axis("date").to_csv().encode(),
-            file_name=f"days-{STATION}.csv" if STATION
-            else f"days-{LATITUDE:+.2f}_{LONGITUDE:+.2f}.csv",
-            mime="text/csv", type="tertiary", icon=":material/download:",
-        )
+    st.divider()
+    section("The numbers", "month by month, over the hours counted")
+    table = pd.DataFrame({
+        "Month": MONTHS,
+        "Days with your wind": [
+            per_month.get(number, 0) * calendar.monthrange(2001, number)[1]
+            for number in range(1, 13)
+        ],
+        **{f"% over {threshold} kt": month_share[threshold].reindex(range(1, 13)).to_numpy()
+           for threshold in ladder},
+    })
+    # Tall enough for all twelve months without scrolling.
+    st.dataframe(table.round(0), hide_index=True, width="stretch", height=460)
+    st.download_button(
+        "Every day as CSV",
+        days.rename("with_your_wind").rename_axis("date").to_csv().encode(),
+        file_name=f"days-{STATION}.csv" if STATION
+        else f"days-{LATITUDE:+.2f}_{LONGITUDE:+.2f}.csv",
+        mime="text/csv", type="tertiary", icon=":material/download:",
+    )
     small_print()
     st.stop()
 
@@ -4133,10 +4046,10 @@ if st.session_state["mode"] == "rating":
     if not can_score(activity):
         st.info(
             f"**{activity}** counts every day as sailable, so there is nothing to "
-            "score. Pick what you sail in the panel on the left."
+            "score. Pick what you sail in the filter."
         )
         st.stop()
-    # The same settings explore and the trip planner count with.
+    # The same settings the trip planner counts with.
     wind = tuple(kept(f"wind_{activity}", ACTIVITIES[activity]["groove"]))
     hours = tuple(kept("hours", DEFAULT_HOURS))
     lasting = kept("lasting", DEFAULT_LASTING)

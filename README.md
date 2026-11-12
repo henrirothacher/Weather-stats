@@ -39,11 +39,12 @@ model cells with model cells; a switch in the trip planner's comparison
 opens it to all. The comparison starts with your three nearest spots; click
 others on its map, or anywhere else to download a new one there.
 
-A day counts, in the rating, explore and the trip planner alike, when
-your wind holds for your hours in a row, the direction swings no more
-than you allow, and every hour feels at least as warm as you ask, wind
-chill counted (the Environment Canada and US National Weather Service
-index). The panel on the left, Filter, holds all of it.
+A day counts, in the rating and the trip planner alike, when your wind
+holds for your hours in a row, the direction swings no more than you
+allow, and every hour feels at least as warm as you ask, wind chill
+counted (the Environment Canada and US National Weather Service index).
+The panel on the left, Filter, holds all of it. Explore has no filter: it
+shows the whole spot for your sport's own range and the usual hours.
 
 Small print: Wind Atlas is for planning, not for navigation. It sums up
 past records, model estimates and station readings with gaps and errors
