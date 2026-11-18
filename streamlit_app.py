@@ -118,14 +118,77 @@ st.html(
     }
     .hero-facts { font-size: .88rem; margin-top: .5rem; color: #8a94a8; }
 
-    /* Landing: the first screen anyone sees. */
-    .landing { padding: 1.6rem 0 1rem; }
-    .landing-title {
-        font-size: clamp(2rem, 3.6vw, 2.8rem); font-weight: 700; line-height: 1.1;
-        letter-spacing: -.02em; color: #e7ebf3;
+    /* Landing: the first screen anyone sees. The map is the stage, wind
+       drifting over it, and everything else floats on glass above it: the
+       title and sources top left, your spots on the right, the spot you
+       clicked along the bottom. Below 1100px they stack around the map. */
+    .st-key-landing_stage {
+        position: relative; border-radius: 16px; overflow: hidden;
+        border: 1px solid #1f2736; box-shadow: 0 24px 60px rgba(0, 0, 0, .45);
+        animation: stageIn 1s cubic-bezier(.2, .7, .2, 1) both;
     }
-    .landing-sub {
-        font-size: 1.02rem; line-height: 1.6; color: #a7b1c4; max-width: 62ch; margin-top: .6rem;
+    .st-key-landing_stage iframe { display: block; }
+    @media (min-width: 1100px) { .st-key-landing_stage { gap: 0 !important; } }
+    /* Under 1100px the panels stack around the map, so the stage is just
+       the map's frame and the panels sit outside its rounded edge. */
+    @media (max-width: 1099px) {
+        .st-key-landing_stage { overflow: visible; border: 0; box-shadow: none; }
+    }
+    .st-key-landing_hero, .st-key-landing_spots, .st-key-picked_panel {
+        background: rgba(10, 13, 20, .78); border: 1px solid rgba(231, 235, 243, .09);
+        border-radius: 14px; box-shadow: 0 12px 36px rgba(0, 0, 0, .45);
+        -webkit-backdrop-filter: blur(12px) saturate(1.2); backdrop-filter: blur(12px) saturate(1.2);
+    }
+    .st-key-landing_hero { padding: 1.5rem 1.6rem 1.3rem; gap: .9rem; }
+    .st-key-landing_spots { padding: 1rem 1rem .8rem; }
+    .st-key-landing_spots .section-label { flex-direction: column; gap: .1rem; }
+    /* On a phone the four sources wrap onto two lines rather than scroll. */
+    @media (max-width: 640px) {
+        .st-key-source_pick [data-testid="stButtonGroup"] > div { flex-wrap: wrap; }
+    }
+    /* The spot you just clicked, the one thing to act on next: edged in
+       teal, its figures four abreast and so smaller. */
+    .st-key-picked_panel { padding: 1rem 1.1rem; border-color: #2dd4bf !important; }
+    .st-key-picked_panel [data-testid="stMetricValue"] { font-size: 1.35rem; }
+    @media (min-width: 1100px) {
+        .st-key-landing_hero {
+            position: absolute; z-index: 5; top: 20px; left: 20px; width: min(540px, 44%);
+            animation: riseIn .8s cubic-bezier(.2, .7, .2, 1) .25s both;
+        }
+        .st-key-landing_spots {
+            position: absolute; z-index: 5; top: 20px; right: 20px; width: 420px;
+            animation: riseIn .8s cubic-bezier(.2, .7, .2, 1) .4s both;
+        }
+        .st-key-landing_pick {
+            position: absolute; z-index: 6; left: 20px; bottom: 20px; right: 72px;
+            width: auto !important; pointer-events: none;
+        }
+        .st-key-landing_stage:has(.st-key-landing_spots) .st-key-landing_pick { right: 460px; }
+        .st-key-picked_panel {
+            pointer-events: auto; animation: riseIn .5s cubic-bezier(.2, .7, .2, 1) both;
+        }
+    }
+    .landing-title {
+        font-size: clamp(2rem, 3vw, 2.9rem); font-weight: 800; line-height: 1.04;
+        letter-spacing: -.035em; color: #e7ebf3;
+    }
+    .landing-title span { color: #5eead4; }
+    .landing-sub { font-size: .98rem; line-height: 1.55; color: #a7b1c4; margin-top: .7rem; }
+    .landing-hint {
+        display: inline-flex; align-items: center; gap: .55rem;
+        font-size: .84rem; font-weight: 600; color: #e7ebf3;
+    }
+    .landing-hint::before {
+        content: ""; width: 8px; height: 8px; border-radius: 50%; background: #2dd4bf;
+        box-shadow: 0 0 0 0 rgba(45, 212, 191, .6); animation: ping 2.2s ease-out infinite;
+    }
+    .landing-hint.warn::before { background: #fbbf24; }
+    @keyframes ping { 70%, 100% { box-shadow: 0 0 0 9px rgba(45, 212, 191, 0); } }
+    @keyframes riseIn { from { opacity: 0; transform: translateY(14px); } }
+    @keyframes stageIn { from { opacity: 0; transform: scale(.985); } }
+    @media (prefers-reduced-motion: reduce) {
+        .st-key-landing_stage, .st-key-landing_hero, .st-key-landing_spots,
+        .st-key-picked_panel, .landing-hint::before { animation: none; }
     }
     .section-label {
         display: flex; align-items: baseline; gap: .7rem; margin: 0 0 .2rem;
@@ -133,10 +196,6 @@ st.html(
     }
     .section-label small { font-size: .82rem; font-weight: 500; color: #8a94a8; }
 
-    /* The spot you just clicked: the one thing to act on next. */
-    .st-key-picked_panel {
-        border: 1px solid #273043 !important; border-radius: 6px; padding: 1rem 1.1rem;
-    }
     /* Saved spots as list rows: hover finds them on the map, Open reopens. */
     [class*="st-key-spot_card_"] {
         border: 1px solid #273043; border-radius: 4px;
@@ -448,16 +507,6 @@ RATING_WEIGHTS = {
     "Season length": 0.20,
     "Big days": 0.15,
     "Steadiness": 0.10,
-}
-
-# A few spots to start from; the map accepts any point.
-PRESETS = {
-    # Offshore ERA5 cells — a cell centred on land measures a sheltered,
-    # slowed-down wind that has nothing to do with sailing conditions.
-    "Vilamoura": (36.75, -8.25),
-    "Imperia": (43.75, 8.00),
-    "Valencia": (39.50, 0.00),
-    "Kiel": (54.50, 10.25),
 }
 
 # Top of the wind slider in explore, in knots.
@@ -1112,7 +1161,6 @@ DECIMAL = re.compile(r"-?\d+\.\d+")
 CELL_KEY = re.compile(r"(?:(arome)_)?([+-]\d+\.\d+)_([+-]\d+\.\d+)")
 STATION_KEY = re.compile(r"(station|metar)_(\w+)")
 
-LINK_NOTE_HEIGHT = 46
 LINK_NOTE = (
     '<div class="link-note">Your spots are saved in this page\'s address: bookmark it or '
     "share it.</div>"
@@ -1138,7 +1186,7 @@ COPY_LINK_SCRIPT = """
 """
 
 # What the map screen remembers about your last pick, cleared on the way back.
-LANDING_PICKS = ("clicked", "preset_applied", "station_pick", "station_find_applied",
+LANDING_PICKS = ("clicked", "centre", "station_pick", "station_find_applied",
                  "station_click_km", "station_clicks_seen")
 
 
@@ -1551,19 +1599,135 @@ MAP_CHROME_CSS = """
     padding: 4px 8px; box-shadow: 0 4px 14px rgba(0, 0, 0, .5);
 }
 .spot-hover-tip::before { border-top-color: #2dd4bf !important; }
-.map-hint {
-    position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
-    z-index: 1000; pointer-events: none; white-space: nowrap;
-    background: rgba(10, 13, 20, .88); color: #e7ebf3;
-    border: 1px solid rgba(45, 212, 191, .7); border-radius: 4px;
-    padding: 7px 14px; font: 600 12px/1.2 Inter, system-ui, sans-serif;
-    letter-spacing: .02em; box-shadow: 0 6px 18px rgba(0, 0, 0, .45);
-}
 </style>
 """
 
+# Wind drifting over the landing map, for the look of it: the flow is a
+# made-up field, not measured or forecast wind. It is drawn on a canvas in a
+# pane of the map's own, above the tiles and the AROME outline and under the
+# dots, and lets every click through. Like the hover script below it runs in
+# the page and reaches into the map's frame; it checks for a new map now and
+# then, since a rerun or a new source draws one. Pans and zooms clear it and
+# it starts again where the map stops. Nothing moves for anyone who asks
+# their system for reduced motion. Same rule as below: no "<" before a
+# letter, "/" or "!".
+WIND_FLOW_SCRIPT = """
+<script>
+(() => {
+  if (window.__windFlow) return;
+  window.__windFlow = true;
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 
-LANDING_MAP_HEIGHT = 440
+  let attached = null;
+  const attach = () => {
+    const frame = document.querySelector(
+      '.st-key-landing_stage iframe[title="streamlit_folium.st_folium"]');
+    const view = frame && frame.contentWindow;
+    const map = view && view.map;
+    if (!map || !view.L || map === attached || !map.getContainer().isConnected) return;
+    attached = map;
+    flow(view, map);
+  };
+  setInterval(attach, 800);
+  attach();
+
+  function flow(view, map) {
+    const L = view.L;
+    const pane = map.getPane("wind") || map.createPane("wind");
+    pane.style.zIndex = 450;
+    pane.style.pointerEvents = "none";
+    const canvas = view.document.createElement("canvas");
+    pane.appendChild(canvas);
+    const ctx = canvas.getContext("2d");
+    const ratio = view.devicePixelRatio || 1;
+    let w = 0, h = 0, moving = false, particles = [];
+
+    // Each trail is its own last positions, redrawn every frame, so nothing
+    // is left behind on the map. A trail that has run its course stops
+    // growing and shrinks away from its tail, then starts again elsewhere.
+    const TRAIL = 110;
+    const spawn = (p) => Object.assign(p || {}, {
+      x: Math.random() * w, y: Math.random() * h,
+      age: 0, life: 500 + Math.random() * 700, trail: [],
+    });
+    const place = () => {
+      const size = map.getSize();
+      w = size.x; h = size.y;
+      canvas.width = w * ratio; canvas.height = h * ratio;
+      canvas.style.width = w + "px"; canvas.style.height = h + "px";
+      L.DomUtil.setPosition(canvas, map.containerPointToLayerPoint([0, 0]));
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      particles = Array.from({ length: Math.round(w * h / 2200) }, () => {
+        const p = spawn();
+        p.age = Math.random() * p.life;
+        return p;
+      });
+    };
+    // Direction and speed by place on the map, in its own pixels, so a
+    // pan carries the pattern with it: broad westerlies bending round eddies.
+    const field = (x, y) => {
+      const u = x / 520, v = y / 520;
+      const angle = 0.55 * Math.sin(v * 1.6 + Math.cos(u * 0.8))
+                  + 0.35 * Math.cos(u * 1.3 - v * 0.7);
+      const speed = 0.18 + 0.14 * (0.5 + 0.5 * Math.sin(u * 0.6 + v * 1.1));
+      return [Math.cos(angle) * speed, Math.sin(angle) * speed];
+    };
+
+    map.on("movestart zoomstart", () => { moving = true; ctx.clearRect(0, 0, w, h); });
+    map.on("moveend zoomend resize", () => { moving = false; place(); });
+    place();
+
+    // Trails are drawn in bands from tail to head, each a little brighter,
+    // so they fade towards the tail: one stroke per band, not per trail.
+    const BANDS = 5;
+    const step = () => {
+      if (!canvas.isConnected || attached !== map) return;
+      view.requestAnimationFrame(step);
+      if (moving) return;
+      ctx.clearRect(0, 0, w, h);
+      const off = map.containerPointToLayerPoint([0, 0]).add(map.getPixelOrigin());
+      for (const p of particles) {
+        const out = p.x > w || p.y > h || p.x < 0 || p.y < 0;
+        if (p.age > p.life || out) {
+          p.trail.shift();
+          if (p.trail.length === 0) spawn(p);
+          continue;
+        }
+        const [dx, dy] = field(p.x + off.x, p.y + off.y);
+        p.trail.push([p.x, p.y]);
+        if (p.trail.length > TRAIL) p.trail.shift();
+        p.x += dx; p.y += dy;
+        p.age += 1;
+      }
+      ctx.lineWidth = 1.1;
+      ctx.lineCap = "round";
+      for (let band = 0; band < BANDS; band++) {
+        ctx.strokeStyle = "rgba(214, 233, 255, " + (0.09 * (band + 1)) + ")";
+        ctx.beginPath();
+        for (const p of particles) {
+          const n = p.trail.length;
+          const from = Math.floor(n * band / BANDS);
+          const to = Math.min(n - 1, Math.floor(n * (band + 1) / BANDS));
+          if (to - from < 1) continue;
+          ctx.moveTo(p.trail[from][0], p.trail[from][1]);
+          for (let i = from + 1; i <= to; i++) ctx.lineTo(p.trail[i][0], p.trail[i][1]);
+        }
+        ctx.stroke();
+      }
+    };
+    view.requestAnimationFrame(step);
+  }
+})();
+</script>
+"""
+
+
+# Tall enough to fill a laptop screen under the top bar.
+LANDING_MAP_HEIGHT = 700
+# Your spots float over the map's right side, a row each, scrolling past
+# this height so the zoom buttons below stay clear.
+SPOT_ROW_HEIGHT = 104
+SPOT_LIST_MAX = 430
 
 # Hovering a saved spot drops a labelled, pulsing marker on the landing map
 # and flies there when the spot is off-screen. Hover never reaches Python, so
@@ -1750,7 +1914,7 @@ def fresh_click(result, seen_key):
     twice still registers) and open ground as a map click: whichever moved on
     is the new one. st_folium replays both on every rerun, hence comparing
     against the clicks already used rather than the current pick, which let
-    a stale click overwrite a preset chosen a moment before."""
+    a stale click overwrite a station found a moment before."""
     state = result or {}
     ground, dot = state.get("last_clicked"), state.get("last_object_clicked")
     clicks = (
@@ -1766,10 +1930,37 @@ def fresh_click(result, seen_key):
     return clicks[0]
 
 
+STATION_PICKS = ("station_pick", "station_find", "station_find_applied", "station_click_km")
+
+
 def switch_source():
     """A station picked from one source is no station in another."""
-    for key in ("station_pick", "station_find", "station_find_applied", "station_click_km"):
+    for key in STATION_PICKS:
         st.session_state.pop(key, None)
+
+
+def forget_pick(centre):
+    """Cancel: the pick goes, and the map stays looking where it was."""
+    for key in ("clicked", *STATION_PICKS):
+        st.session_state.pop(key, None)
+    st.session_state["centre"] = centre
+
+
+def pick_panel(slot, spot, facts, name, action):
+    """The spot you clicked, in `slot` at the foot of the map: three facts
+    as (label, value, icon, help), a name to give it, the way in and Cancel."""
+    with slot.container(key="picked_panel"):
+        columns = st.columns([2, 2, 2, 3], vertical_alignment="center")
+        for column, (label, value, icon, note) in zip(columns, facts):
+            column.metric(label, value, icon=icon, help=note)
+        with columns[3]:
+            name = st.text_input("Name this spot", value=name, key=f"name_{spot_key(spot)}")
+            with st.container(horizontal=True):
+                if st.button(f":material/arrow_forward: {action}", type="primary",
+                             width="stretch"):
+                    enter_spot({**spot, "name": name})
+                    st.rerun()
+                st.button("Cancel", on_click=forget_pick, args=((spot["lat"], spot["lon"]),))
 
 
 if st.session_state["spot"] is None:
@@ -1798,45 +1989,41 @@ if st.session_state["spot"] is None:
                 "spot, 25 km cells, back to 1940 on request.",
     }[source]
 
-    st.html(
-        '<div class="landing">'
-        '<div class="landing-title">Hourly wind history for any spot</div>'
-        f'<div class="landing-sub">{pitch} Then see how often it is sailable for you, '
-        "or compare it with other spots on the dates you are going.</div></div>"
-    )
+    # The map is the stage; the rest floats on it (see "Landing" in the styles).
+    # Each part gets its slot now, in the order a phone stacks them, and is
+    # filled further down once what it shows is known.
+    with st.container(key="landing_stage"):
+        hero = st.container(key="landing_hero")
+        map_col = st.container()
+        list_col = st.container(key="landing_spots") if saved else None
+        pick_slot = st.container(key="landing_pick")
 
-    preset, found = None, None
-    with st.container(horizontal=True, vertical_alignment="bottom", gap="large"):
+    hero.html(
+        '<div class="landing-title">Hourly wind history for <span>any spot</span></div>'
+        f'<div class="landing-sub">{pitch} Then see how often it is sailable for you, '
+        "or compare it with other spots on the dates you are going.</div>"
+    )
+    found = None
+    with hero.container(horizontal=True, vertical_alignment="bottom", gap="medium"):
         source = st.segmented_control(
-            "Data source", list(SOURCES), format_func=SOURCES.get,
+            "Data source", list(SOURCES),
+            format_func=lambda key: SOURCES[key].split(" · ")[0],
             default=st.session_state["data_source"], required=True, key="source_pick",
             on_change=switch_source,
         )
         st.session_state["data_source"] = source
-        if source == "era5":
-            preset = pick(
-                st.segmented_control(
-                    "Jump to a known spot", list(PRESETS), default=None, key="preset",
-                ),
-                None,
-            )
-        elif stations is not None:
+        if stations is not None:
             labels = (stations["name"] + " · " + stations.index.to_series()).to_dict()
             found = st.selectbox(
                 "Find a station", list(stations.index), index=None, format_func=labels.get,
                 placeholder=f"Search {len(stations):,} stations", key="station_find",
-                width=320,
+                width=300,
             )
             st.toggle(
                 "By the water only", value=True, key="by_water",
                 help=f"Stations within {SHORE_KM} km of the sea or a lake. Small lakes "
                 "may be missing from the map of shores: switch this off to see them all.",
             )
-    if preset and st.session_state.get("preset_applied") != preset:
-        st.session_state["preset_applied"] = preset
-        st.session_state["clicked"] = PRESETS[preset]
-        st.session_state["recentre"] = PRESETS[preset]
-        st.rerun()
     if found and st.session_state.get("station_find_applied") != found:
         st.session_state["station_find_applied"] = found
         st.session_state["station_pick"] = found
@@ -1844,18 +2031,15 @@ if st.session_state["spot"] is None:
         st.session_state["station_recentre"] = True
         st.rerun()
     if stations_error is not None:
-        st.error(f"Could not load the {STATION_NAMES[source]} stations: {stations_error}")
+        hero.error(f"Could not load the {STATION_NAMES[source]} stations: {stations_error}")
         st.stop()
+    hint_slot = hero.empty()
 
     clicked = st.session_state.get("clicked")
+    centre = clicked or st.session_state.get("centre")
     picked = st.session_state.get("station_pick")
     if stations is None or picked not in stations.index:
         picked = None
-    # Map and your spots side by side, so hovering a spot can show it on the map.
-    if saved:
-        map_col, list_col = st.columns([3, 2], gap="medium")
-    else:
-        map_col, list_col = st.container(), None
 
     outside = False  # a click where the model has no data
     with map_col:
@@ -1863,11 +2047,12 @@ if st.session_state["spot"] is None:
             grid = CELL_GRIDS[source]
             home, far = CELL_VIEWS[source]
             world = base_map(
-                location=list(clicked or home),
-                zoom_start=7 if clicked else far,
+                location=list(centre or home),
+                zoom_start=7 if centre else far,
                 control_scale=True,
                 min_zoom=2,
                 world_copy_jump=True,
+                zoom_control="bottomright",
             )
             if source == "arome":
                 # The model stops at the outline; a click past it finds nothing.
@@ -1883,7 +2068,7 @@ if st.session_state["spot"] is None:
                 hint = "Click again to move your pick"
             else:
                 hint = "Click anywhere on the water" + (" inside the outline" if source == "arome" else "")
-            world.get_root().html.add_child(folium.Element(f'<div class="map-hint">{hint}</div>'))
+            hint_slot.html(f'<div class="landing-hint{" warn" if outside else ""}">{hint}</div>')
             # Your spots, so the map doubles as your library.
             for entry in saved.values():
                 dot_marker(entry["lat"], entry["lon"], spot_title(entry)).add_to(world)
@@ -1899,28 +2084,24 @@ if st.session_state["spot"] is None:
                 ).add_to(world)
                 dot_marker(cell_lat, cell_lon, "Selected cell", picked=True).add_to(world)
 
-            # st_folium keeps its own view across reruns, so a preset change has to
-            # push a new centre explicitly or only the panel below would update.
-            recentre = st.session_state.pop("recentre", None)
             result = st_folium(
                 world, height=LANDING_MAP_HEIGHT, use_container_width=True,
                 key=f"{source}_picker",
-                center=list(recentre) if recentre else None,
-                zoom=8 if recentre else None,
                 returned_objects=["last_clicked", "last_object_clicked",
                                   "last_object_clicked_count"],
             )
         else:
-            focus = tuple(stations.loc[picked, ["lat", "lon"]]) if picked else SWISS_CENTRE
+            focus = tuple(stations.loc[picked, ["lat", "lon"]]) if picked else centre or SWISS_CENTRE
             world = base_map(
-                location=list(focus), zoom_start=10 if picked else STATION_ZOOM[source],
+                location=list(focus), zoom_start=10 if picked or centre else STATION_ZOOM[source],
                 control_scale=True, min_zoom=2, world_copy_jump=True,
+                zoom_control="bottomright",
             )
             hint = (
                 "Click another station to switch" if picked
                 else "Click a station, or anywhere for the nearest one"
             )
-            world.get_root().html.add_child(folium.Element(f'<div class="map-hint">{hint}</div>'))
+            hint_slot.html(f'<div class="landing-hint">{hint}</div>')
             # The stations where the map looks, as it reported its view after
             # the last move; before it has, those nearest its centre. The ones
             # on your list stand out. They are a layer of their own, so
@@ -1961,6 +2142,7 @@ if st.session_state["spot"] is None:
         st.session_state["station_pick"] = km.idxmin()
         st.session_state["station_click_km"] = float(km.min())
         st.rerun()
+    st.html(WIND_FLOW_SCRIPT, unsafe_allow_javascript=True)
 
     if list_col is not None:
         with list_col:
@@ -1970,7 +2152,8 @@ if st.session_state["spot"] is None:
             )
             # Same height as the map, less the note below it, scrolling once
             # the list outgrows it.
-            with st.container(height=LANDING_MAP_HEIGHT - 58 - LINK_NOTE_HEIGHT, gap="xsmall"):
+            list_height = min(SPOT_LIST_MAX, SPOT_ROW_HEIGHT * len(saved))
+            with st.container(height=list_height, gap="xsmall", border=False):
                 for index, (key, entry) in enumerate(saved.items()):
                     if entry.get("station"):
                         where = (f"{STATION_NAMES[entry['source']]} {entry['station']} · "
@@ -2016,33 +2199,19 @@ if st.session_state["spot"] is None:
         grid = CELL_GRIDS[source]
         latitude, longitude = snap_to_grid(raw_lat, grid), snap_to_grid(raw_lon, grid)
         zone = timezone_at(latitude, longitude)
-        cell = {"lat": latitude, "lon": longitude, "source": source}
+        cell = {"lat": latitude, "lon": longitude, "source": source, "zone": zone}
         cached = spot_path(cell)
-
-        with st.container(key="picked_panel"):
-            facts_row = st.columns([2, 2, 2, 3], vertical_alignment="center")
-            facts_row[0].metric(
-                "Your pick", f"{latitude:+.2f}, {longitude:+.2f}",
-                icon=":material/location_on:",
-                help=f"You clicked {raw_lat:.3f}, {raw_lon:.3f}",
-            )
-            facts_row[1].metric("Time zone", zone.split("/")[-1].replace("_", " "),
-                                icon=":material/schedule:", help=zone)
-            facts_row[2].metric(
-                "Data", "on disk" if cached.exists() else "needs fetching",
-                icon=":material/database:",
-            )
-            with facts_row[3]:
-                known = load_registry().get(spot_key(cell), {})
-                name = st.text_input(
-                    "Name this spot",
-                    value=preset or (spot_title(known) if known else place_name(latitude, longitude)),
-                    key=f"name_{spot_key(cell)}",
-                )
-                if st.button(":material/arrow_forward: Use this location",
-                             type="primary", width="stretch"):
-                    enter_spot({**cell, "zone": zone, "name": name})
-                    st.rerun()
+        known = load_registry().get(spot_key(cell), {})
+        pick_panel(
+            pick_slot, cell,
+            [("Your pick", f"{latitude:+.2f}, {longitude:+.2f}", ":material/location_on:",
+              f"You clicked {raw_lat:.3f}, {raw_lon:.3f}"),
+             ("Time zone", zone.split("/")[-1].replace("_", " "), ":material/schedule:", zone),
+             ("Data", "on disk" if cached.exists() else "needs fetching",
+              ":material/database:", None)],
+            spot_title(known) if known else place_name(latitude, longitude),
+            "Use this location",
+        )
 
     if picked:
         row = stations.loc[picked]
@@ -2057,31 +2226,19 @@ if st.session_state["spot"] is None:
         if km and km >= 1:
             where += f" · nearest to your click, {km:.0f} km away"
 
-        with st.container(key="picked_panel"):
-            facts_row = st.columns([2, 2, 2, 3], vertical_alignment="center")
-            facts_row[0].metric("Your station", row["name"], icon=":material/sensors:",
-                                help=where)
-            facts_row[1].metric(
-                "Height", f"{row['height']:.0f} m", icon=":material/landscape:",
-                help="Above sea level. A station up a hill feels more wind than "
-                "the water below it.",
-            )
-            facts_row[2].metric(
-                "Data", "on disk" if cached.exists() else f"since {row['since']:.0f}",
-                icon=":material/database:",
-                help=None if row["has_temp"] else "This station measures no air "
-                "temperature, so it borrows it from the nearest one that does.",
-            )
-            with facts_row[3]:
-                known = load_registry().get(spot_key(station), {})
-                name = st.text_input(
-                    "Name this spot", value=known.get("name") or row["name"],
-                    key=f"name_{spot_key(station)}",
-                )
-                if st.button(":material/arrow_forward: Use this station",
-                             type="primary", width="stretch"):
-                    enter_spot({**station, "name": name})
-                    st.rerun()
+        pick_panel(
+            pick_slot, station,
+            [("Your station", row["name"], ":material/sensors:", where),
+             ("Height", f"{row['height']:.0f} m", ":material/landscape:",
+              "Above sea level. A station up a hill feels more wind than the water below it."),
+             ("Data", "on disk" if cached.exists() else f"since {row['since']:.0f}",
+              ":material/database:",
+              None if row["has_temp"] else "This station measures no air temperature, "
+              "so it borrows it from the nearest one that does.")],
+            load_registry().get(spot_key(station), {}).get("name") or row["name"],
+            "Use this station",
+        )
+
     small_print()
     st.stop()
 
