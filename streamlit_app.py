@@ -3374,6 +3374,10 @@ ANSWER_CSS = """
 .st-key-trip_map { position: relative; }
 .st-key-trip_map iframe { display: block; height: 320px !important; border-radius: 0; }
 .st-key-trip_hero { gap: .9rem; padding: .6rem 0 1.2rem; }
+/* Stacked above a full-width map, the answer keeps the page's margin. */
+@media (min-width: 1000px) {
+    .st-key-trip_hero { padding-left: 3rem; padding-right: 3rem; }
+}
 .st-key-trip_hero .stage-title { font-size: clamp(1.8rem, 3.7cqi, 2.7rem); }
 .stage-verdict {
     margin-top: .7rem; font-size: 1.05rem; font-weight: 600; line-height: 1.45; color: #e7ebf3;
