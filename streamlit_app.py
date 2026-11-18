@@ -1435,11 +1435,6 @@ def kept(key, default):
     return st.session_state.get(f"kept_{key}", default)
 
 
-def percent(value):
-    """A share as people say it: a chance that is not quite zero is not 0%."""
-    return "<1%" if 0 < value < 0.5 else f"{value:.0f}%"
-
-
 def wind_words(wind):
     """6–25 kn, 15+ kn or up to 12 kn: a wind range as a sailor says it."""
     low, high = wind
@@ -2818,12 +2813,11 @@ if st.session_state["mode"] is None:
 
 
 # --- The filter and the trip's dates -------------------------------------
-# The trip planner asks one question, your dates; the rest of its filter is
-# in the sidebar, beside the answer, to change while you look. The rating
+# The trip planner asks one question, your dates; the rest of its filter,
+# and which spots it compares, is in the sidebar beside the answer. The rating
 # has the same sidebar, and the settings share their keys, so one given in
 # either view is already there in the other.
 
-COUNT_WORDS = ["No", "One", "Two", "Three", "Four", "Five"]
 # Where the trip's dates start before you pick: these days of next month.
 TRIP_DAYS = (10, 16)
 # A trip is at most this many days, as long as the calendar lets you pick:
@@ -3118,7 +3112,7 @@ def ask_dates(key, default, longest=365):
 
 def ask_trip_dates(title, default):
     """The trip planner's one question, your dates: the run stops here until
-    Show me, and Change dates in the filter comes back to it."""
+    Show me, and Change dates beside the answer's title comes back to it."""
     if st.session_state.setdefault("trip_step", 0):
         return
     with st.container(key="trip_page"):
@@ -3164,13 +3158,6 @@ def settings(mode):
     side.caption("Every hour of the day" if hours == (0, 23)
                  else f"{hours[0]:02d}:00–{hours[1]:02d}:59 local time")
     ask_lasting(side, hours)
-    if mode == "window":
-        # The calendar has no room here: your dates, and the way back to it.
-        side.markdown(f"Dates: **{dates_label(kept('trip_dates', coming_dates(*TRIP_DAYS)))}**")
-        if side.button("Change dates", key="trip_redate", icon=":material/edit_calendar:",
-                       type="tertiary"):
-            st.session_state["trip_step"] = 0
-            st.rerun()
     remembered(side.segmented_control, "Years", list(LOOKBACK), required=True,
                key="years", default=DEFAULT_YEARS, start="default")
     if SOURCE == "era5" and data_start.year > 1940:
@@ -3190,6 +3177,9 @@ def settings(mode):
                    "holds below 10 °C with wind over 4.8 km/h; warmer or calmer, it is "
                    "the air temperature itself. Every hour in a row has to feel at least "
                    "this warm. Any: cold is no bar.")
+    if mode == "window":
+        side.subheader("Compare")
+        ask_kind(side)
     return activity
 
 
@@ -3197,7 +3187,7 @@ def ask_kind(place):
     """Which spots to set beside this one, drawn in `place`: its own kind
     only, or every spot you have downloaded."""
     remembered(
-        place.segmented_control, "Compare this spot with", [True, False], required=True,
+        place.segmented_control, "Compare with", [True, False], required=True,
         format_func=lambda same: ("Stations only" if STATION else "Model cells only") if same
         else "All spots",
         key="like_with_like", default=DEFAULT_LIKE_WITH_LIKE, start="default",
@@ -3228,16 +3218,6 @@ ANSWER_CSS = """
 /* Room for the calendar: three months side by side when it is open. */
 .st-key-trip_page:has([class*="_calendar"]) { max-width: 1180px; }
 .st-key-trip_result { max-width: 1000px; }
-.answer-head { margin: 1.1rem 0 1.3rem; }
-.answer-big { display: flex; align-items: baseline; gap: .2rem .8rem; flex-wrap: wrap; margin-top: .4rem; }
-.answer-num {
-    font-size: clamp(3.4rem, 8vw, 5.6rem); font-weight: 800; line-height: .95;
-    letter-spacing: -.05em; color: #2dd4bf; font-variant-numeric: tabular-nums;
-}
-.answer-unit { font-size: clamp(1.3rem, 2.6vw, 1.9rem); font-weight: 700; letter-spacing: -.02em; color: #e7ebf3; }
-.answer-sub { max-width: 64ch; margin-top: .6rem; font-size: .98rem; line-height: 1.5; color: #a7b1c4; }
-.answer-sub b { color: #e7ebf3; }
-
 .chapter-lead {
     margin-top: 1.2rem; font-size: clamp(1.3rem, 2.4vw, 1.7rem); font-weight: 700;
     line-height: 1.2; letter-spacing: -.01em; color: #e7ebf3;
@@ -3288,49 +3268,55 @@ ANSWER_CSS = """
 }
 .legend b { color: #e7ebf3; }
 
-/* The way down to the comparison, under the trip's title. */
-.jump {
-    display: inline-block; margin-top: .7rem; color: #2dd4bf !important;
-    font-size: .95rem; font-weight: 600; text-decoration: none !important;
-}
-.jump:hover { text-decoration: underline !important; }
-#compare { scroll-margin-top: 7rem; }
-
-/* The comparison: a panel of its own, then a card per spot, best first. */
-.st-key-compare_panel {
-    margin-top: 2.4rem; padding: 1.5rem 1.6rem 1.7rem !important;
-    border: 1px solid #273043; border-radius: 10px; background: #0c1017;
-}
-.cmp-title { font-size: 1.6rem; font-weight: 700; line-height: 1.15; color: #e7ebf3; }
-.cmp-verdict { margin: .4rem 0 .3rem; font-size: 1.1rem; font-weight: 600; color: #e7ebf3; }
+/* The ranking: a row a spot, best first, the one shown in detail edged
+   in teal. Rank, name, days in a typical year with a meter, the wind. */
+.cmp-verdict { margin: .2rem 0 1rem; font-size: 1.1rem; font-weight: 600; color: #e7ebf3; }
 .cmp-verdict b { color: #2dd4bf; }
-[class*="st-key-cmp_"] {
-    padding: 1.05rem 1.15rem 1.1rem !important; border: 1px solid #273043; border-radius: 10px;
-    background: #10141c;
+[class*="st-key-trip_row_"] {
+    padding: .75rem .6rem .75rem 1rem !important; border: 1px solid #273043;
+    border-radius: 10px; background: #10141c;
 }
-[class*="st-key-cmp_top"] { border-color: #2dd4bf; }
-/* A chosen spot and its remove button share one line; the name wraps. */
-[class*="st-key-slot_row_"] { flex-wrap: nowrap !important; }
-[class*="st-key-slot_row_"] > div:first-child { flex: 1 1 auto !important; min-width: 0 !important; }
-[class*="st-key-slot_row_"] > div:not(:first-child) { flex: 0 0 auto !important; }
-.cmp-tags { display: flex; align-items: center; gap: .55rem; min-height: 1.3rem; font-size: .78rem; color: #8a94a8; }
-.cmp-tags .rank { font-weight: 700; color: #e7ebf3; }
-.cmp-tags .lead { color: #2dd4bf; }
-.cmp-name {
-    margin-top: .45rem; font-size: 1.12rem; font-weight: 700; line-height: 1.25; color: #e7ebf3;
-    /* Up to two lines, so a long name keeps its place name. */
-    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+[class*="st-key-trip_row_"][class*="_on"] { border-color: #2dd4bf; background: #0f1a1d; }
+.trip-row {
+    display: grid; align-items: center; gap: .3rem 1.2rem;
+    grid-template-columns: 1.4rem minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1.2fr);
 }
-.cmp-source { margin-top: .1rem; font-size: .76rem; color: #5b6478; }
-.cmp-big { margin-top: .6rem; font-size: .92rem; color: #a7b1c4; }
-.cmp-big b {
-    margin-right: .2rem; font-size: 2.6rem; font-weight: 800; letter-spacing: -.04em;
-    line-height: 1; color: #e7ebf3; font-variant-numeric: tabular-nums;
+.row-rank { font-size: 1.15rem; font-weight: 800; color: #5b6478; font-variant-numeric: tabular-nums; }
+.row-name { min-width: 0; }
+.row-name b {
+    display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+    font-size: 1.02rem; color: #e7ebf3;
 }
-[class*="st-key-cmp_top"] .cmp-big b { color: #2dd4bf; }
-.cmp-card .band { height: 8px; margin: .7rem 0 .9rem; }
-.cmp-facts { display: grid; gap: .32rem; font-size: .85rem; color: #a7b1c4; }
-.cmp-facts b { color: #e7ebf3; }
+.row-name small { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; font-size: .76rem; color: #5b6478; }
+.row-name .tag {
+    padding: .05rem .45rem; border-radius: 999px; border: 1px solid #2dd4bf;
+    font-weight: 700; color: #2dd4bf;
+}
+.row-days { font-size: .85rem; color: #a7b1c4; }
+.row-days b { font-size: 1.7rem; font-weight: 800; letter-spacing: -.03em; color: #e7ebf3; font-variant-numeric: tabular-nums; }
+[class*="st-key-trip_row_0"] .row-rank, [class*="st-key-trip_row_0"] .row-days b { color: #2dd4bf; }
+.meter { display: block; height: 6px; margin-top: .35rem; border-radius: 3px; background: #1e2533; overflow: hidden; }
+.meter i { display: block; height: 100%; background: #14b8a6; }
+.row-facts { font-size: .85rem; line-height: 1.45; color: #a7b1c4; }
+/* Details and Shown below take the same room, so the rows line up. */
+[class*="st-key-trip_focus_"] button { min-width: 7.2rem; }
+.st-key-trip_keep { visibility: hidden; }
+/* On a phone the row's text takes the whole width, its buttons a line below. */
+@media (max-width: 640px) {
+    .trip-row { grid-template-columns: 1.4rem minmax(0, 1fr); }
+    .row-days, .row-facts { grid-column: 2; }
+    [class*="st-key-trip_row_"] { flex-wrap: wrap !important; }
+    [class*="st-key-trip_row_"] > div:first-child { flex: 1 0 100% !important; }
+}
+.st-key-trip_add_panel {
+    margin-top: .4rem; padding: 1.1rem 1.2rem !important;
+    border: 1px dashed #2dd4bf; border-radius: 10px; background: #0c1017;
+}
+.add-title { font-size: 1.15rem; font-weight: 700; color: #e7ebf3; }
+.detail-title {
+    margin-top: 2.2rem; padding-top: 1.4rem; border-top: 1px solid #273043;
+    font-size: 1.5rem; font-weight: 700; letter-spacing: -.01em; color: #e7ebf3;
+}
 
 </style>
 """
@@ -3659,16 +3645,15 @@ if st.session_state["mode"] == "explore":
 
 
 # --- Plan a trip: your dates, then what to expect --------------------------
-# Your spot on set dates, a regatta or a week away: you pick the days, and
-# the wind you need and your hours on the water come from the filter on the
-# left. Where is the spot you picked. Then what those dates have brought in
-# the years on record, and the same dates at up to three of your other
-# spots side by side, should this one disappoint.
+# Your dates, a regatta or a week away, at your spots side by side: you pick
+# the days, and the wind you need and your hours on the water come from the
+# filter on the left. The answer is a ranking of this spot and up to five
+# of your others, best first, with any one of them in full below it.
 
 DATES_HINT = ("Every year on record is checked on these days. Wind and hours on the water "
               "are set in the filter.")
-# How many of your other spots a trip sets beside yours: one row of cards.
-COMPARE_UP_TO = 3
+# How many of your other spots a trip ranks beside yours.
+COMPARE_UP_TO = 5
 COMPARE_MAP_HEIGHT = 340
 # A click on the comparison map counts for the spot within this far of it.
 COMPARE_CLICK_KM = 50
@@ -3737,25 +3722,27 @@ def band_bar(bands, legend=True):
     return f'<div class="band">{parts}</div>' + (f'<div class="legend">{named}</div>' if legend else "")
 
 
-def swap_trip(entry, key, where, chosen):
-    """Go to a compared spot instead, the whole app with you: the one you
-    leave joins the others."""
-    enter_spot({k: v for k, v in entry.items() if k != "path"})
-    st.session_state["trip_compare"] = [where, *[other for other in chosen if other != key]]
-
-
-def add_compare(widget):
-    """A spot picked in an empty slot joins the others; the slot clears."""
-    key, st.session_state[widget] = st.session_state[widget], None
+def add_compare(key):
+    """A spot joins the comparison while there is room for it."""
     chosen = st.session_state.get("trip_compare", [])
     if key and key not in chosen and len(chosen) < COMPARE_UP_TO:
         st.session_state["trip_compare"] = [*chosen, key]
+
+
+def pick_compare():
+    """A spot picked from your list joins the comparison; the pick clears."""
+    key, st.session_state["trip_add_pick"] = st.session_state["trip_add_pick"], None
+    add_compare(key)
 
 
 def drop_compare(key):
     st.session_state["trip_compare"] = [
         other for other in st.session_state.get("trip_compare", []) if other != key
     ]
+
+
+def focus_on(key):
+    st.session_state["trip_focus"] = key
 
 
 def nearest_spots(spots, where, others):
@@ -3767,33 +3754,6 @@ def nearest_spots(spots, where, others):
                  np.array([spots[key]["lat"] for key in others]),
                  np.array([spots[key]["lon"] for key in others]))
     return [others[index] for index in np.argsort(km)[:COMPARE_UP_TO]]
-
-
-def compare_slots(chosen, others, spots, names):
-    """A slot for each spot beside yours: a chosen one, with a way to take
-    it off, or an empty one to fill from your list or the map."""
-    free = [key for key in others if key not in chosen]
-    for place, column in enumerate(st.columns(COMPARE_UP_TO, gap="small")):
-        with column.container(border=True, key=f"slot_{place}"):
-            if place < len(chosen):
-                key = chosen[place]
-                with st.container(horizontal=True, vertical_alignment="top", gap="small",
-                                  key=f"slot_row_{place}"):
-                    st.markdown(f"**{names[key]}**  \n:gray[{source_credit(spots[key])}]",
-                                width="stretch")
-                    st.button(":material/close:", key=f"slot_drop_{key}", type="tertiary",
-                              help="Take it off", on_click=drop_compare, args=(key,),
-                              width="content")
-            elif free:
-                st.selectbox(
-                    f"Spot {place + 1}", free, index=None, format_func=names.get,
-                    placeholder="Add one of your spots", key=f"slot_add_{place}",
-                    on_change=add_compare, args=(f"slot_add_{place}",),
-                    label_visibility="collapsed",
-                )
-                st.caption("or click the map")
-            else:
-                st.caption("Empty: click the map to add a spot")
 
 
 def compare_map(spots, where, chosen, others, names, new):
@@ -3886,35 +3846,29 @@ NEW_SPOT_NOTES = {
 }
 
 
-def compare_card(name, credit, outlook, length, rank, tags):
-    """One spot on your dates, to set beside the others: its place among
-    them, the days that bring your wind, and how the wind and air run."""
+def trip_row(name, credit, outlook, length, rank, tags):
+    """One spot on your dates, a row of the ranking: its place, the days that
+    bring your wind in a typical year, and how the wind and air run."""
     days = outlook["days"]
     if not len(days) or outlook["knots"] is None:
-        body = '<div class="cmp-facts"><span>No record on these dates.</span></div>'
+        count, share, facts = "–", 0, "No record on these dates"
     else:
-        bands = wind_bands(outlook)
+        count = typical_days(days, length)
+        share = count / length * 100
         low, _, high = outlook["knots"]
-        facts = [
-            f"Usually <b>{low:.0f}–{high:.0f} kt</b>",
-            f"<b>{bands['good']}%</b> in range · {bands['light']}% too light",
-            f"From the <b>{prevailing_direction(outlook['direction'])}</b> when right"
-            if len(outlook["direction"]) else "Never in your range",
-            f"<b>{outlook['air']:.0f} °C</b> air" if outlook["air"] is not None
-            else "No air temperature",
-        ]
-        body = (
-            f'<div class="cmp-big"><b>{typical_days(days, length)}</b>of {length} days</div>'
-            + band_bar(bands, legend=False)
-            + f'<div class="cmp-facts">{"".join(f"<span>{fact}</span>" for fact in facts)}</div>'
-        )
-    badges = (f'<span class="rank">#{rank}</span>' if rank else "") + "".join(
-        f'<span class="{"lead" if tag == "Most days" else ""}">{tag}</span>' for tag in tags
-    )
+        facts = f"Usually {low:.0f}–{high:.0f} kt"
+        if len(outlook["direction"]):
+            facts += f" from the {prevailing_direction(outlook['direction'])}"
+        if outlook["air"] is not None:
+            facts += f"<br>{outlook['air']:.0f} °C air"
+    tags = "".join(f'<span class="tag">{tag}</span>' for tag in tags)
     return (
-        f'<div class="cmp-card"><div class="cmp-tags">{badges}</div>'
-        f'<div class="cmp-name" title="{html.escape(name)}">{html.escape(name)}</div>'
-        f'<div class="cmp-source">{credit}</div>{body}</div>'
+        f'<div class="trip-row"><span class="row-rank">{rank or "–"}</span>'
+        f'<span class="row-name"><b title="{html.escape(name)}">{html.escape(name)}</b>'
+        f"<small>{tags}{credit}</small></span>"
+        f'<span class="row-days"><span><b>{count}</b> of {length} days</span>'
+        f'<i class="meter"><i style="width:{share:.0f}%"></i></i></span>'
+        f'<span class="row-facts">{facts}</span></div>'
     )
 
 
@@ -3925,12 +3879,11 @@ if st.session_state["mode"] == "window":
     where = next((key for key, entry in spots.items() if entry["path"] == dataset_path), None)
     if where is None:
         where, spots = "here", {"here": {**spot, "path": dataset_path}, **spots}
-    entry = spots[where]
     names = spot_names(spots)
     default_dates = coming_dates(*TRIP_DAYS)
     ask_trip_dates(f"Plan a trip to {html.escape(names[where])}", default_dates)
 
-    # --- The answer: your days, the wind, the air, then the others ---
+    # --- The answer: your spots ranked on your dates, then one in full ---
     activity = settings("window")
     dates = kept("trip_dates", default_dates)
     length = len(window_days(dates))
@@ -3945,216 +3898,213 @@ if st.session_state["mode"] == "window":
         else f"between {hours[0]:02d}:00 and {hours[1]:02d}:59"
     )
 
+    def outlook_at(key):
+        path = spots[key]["path"]
+        return trip_outlook(path, path.stat().st_mtime, spots[key]["zone"], years_back,
+                            wind, lasting, hours, dates, shift, feels)
+
+    # Yours and up to COMPARE_UP_TO others: your nearest at first, then your picks.
+    others = [key for key in comparable(spots) if key != where]
+    if "trip_compare" not in st.session_state:
+        st.session_state["trip_compare"] = nearest_spots(spots, where, others)
+    chosen = [key for key in st.session_state["trip_compare"] if key in others][:COMPARE_UP_TO]
+    st.session_state["trip_compare"] = chosen
+    with st.spinner("Reading every year on record..."):
+        outlooks = {key: outlook_at(key) for key in [where, *chosen]}
+    totals = {key: typical_days(found["days"], length) for key, found in outlooks.items()
+              if len(found["days"]) and found["knots"] is not None}
+    # Best first, yours ahead of a tie; no record on these dates, last.
+    order = sorted(outlooks, key=lambda key: (-totals.get(key, -1), key != where))
+    top = max(totals.values(), default=None)
+    leaders = [key for key in order if totals.get(key) == top]
+    focus = st.session_state.get("trip_focus")
+    if focus not in outlooks:
+        focus = where
+
     with st.container(key="trip_result"):
-        def outlook_at(key):
-            path = spots[key]["path"]
-            return trip_outlook(path, path.stat().st_mtime, spots[key]["zone"], years_back,
-                                wind, lasting, hours, dates, shift, feels)
-
-        with st.spinner("Reading every year on record..."):
-            outlook = outlook_at(where)
-        days = outlook["days"]
-        recorded = len(days) and outlook["knots"] is not None
-        st.html(
-            '<div class="answer-head"><div class="trip-title">'
-            f"{html.escape(names[where])} · {dates_label(dates)}</div>"
-            # Straight down to the comparison, which waits at the end.
-            + ('<a class="jump" href="#compare">Compare with other spots ↓</a>' if recorded else "")
-            + "</div>"
-        )
-        if not recorded:
-            st.info(f"{names[where]} has no record on {dates_label(dates)} yet. Pick other "
-                    "dates, or another spot.")
-            st.stop()
-
-        # Your days: how many bring your wind, and in every year on record.
-        typical = typical_days(days, length)
-        counted = f'<span class="answer-num">{typical}</span>'
-        years_text = f"{days.index.min().year}–{days.index.max().year}"
-        rows = year_rows(days, dates)
-        record = ""
-        if rows:
-            tally = {year: sum(kind == "g" for kind in kinds) for year, kinds in rows}
-            most, least = max(tally.values()), min(tally.values())
-            tops = [year for year in tally if tally[year] == most]
-            lows = [year for year in tally if tally[year] == least]
-            record = (
-                '<div class="chapter-lead">'
-                + (f"{most} of {length} days, every year" if most == least else
-                   f"Between {least} and {most} of {length} days a year")
-                + '</div><div class="chapter-sub">One row per year, a dot per day, lit when '
-                "your wind came."
-                + ("" if most == least else
-                   f" <b>{most}</b> in {years_named(tops, len(tally))}; the leanest, "
-                   f"{years_named(lows, len(tally))}, had <b>{least}</b>.")
-                + "</div>"
-                + dot_rows([
-                    (year, kinds, tally[year], f"{year}: {tally[year]} of {length} days",
-                     most != least and year in tops and len(tops) <= 3)
-                    for year, kinds in rows
-                ])
+        with st.container(horizontal=True, vertical_alignment="center"):
+            st.html(f'<div class="trip-title">Your wind on {dates_label(dates)}</div>',
+                    width="stretch")
+            if st.button("Change dates", icon=":material/edit_calendar:", key="trip_redate"):
+                st.session_state["trip_step"] = 0
+                st.rerun()
+        span = "every year on record" if years_back is None else f"the last {years_back} years"
+        bold = {key: f"<b>{html.escape(names[key])}</b>" for key in order}
+        if len(totals) < 2:
+            verdict = ""
+        elif len(leaders) == len(totals):
+            verdict = f"Much the same at each: {top} of {length} days."
+        elif leaders == [where]:
+            verdict = f"{bold[where]} is your best bet: {top} of {length} days."
+        elif where in leaders:
+            verdict = f"{joined([bold[key] for key in leaders])} share the most: {top} of {length} days."
+        else:
+            verdict = (
+                f"{joined([bold[key] for key in leaders])} "
+                f"{'brings' if len(leaders) == 1 else 'bring'} the most: {top} of {length} "
+                f"days, against {totals.get(where, 0)} at {bold[where]}."
             )
         st.html(
-            '<div class="trip-block">'
-            f'<div class="answer-big">{counted}<span class="answer-unit">of {length} days</span>'
-            f'</div><div class="answer-sub">with <b>{wind_words(wind)}</b> for {lasting} h in a '
-            f"row {within}, in a typical year: {html.escape(percent(days['good'].mean() * 100))}"
-            f" of days, counted over {years_text}.</div>{record}</div>"
+            f'<div class="chapter-sub">Days with <b>{wind_words(wind)}</b> for {lasting} h in a '
+            f"row {within}, in a typical year of {span}, each spot in its own local time."
+            f'</div><div class="cmp-verdict">{verdict}</div>'
         )
 
-        # The wind: how hard, how often right, from where, best when.
-        bands = wind_bands(outlook)
-        low, middle, high = outlook["knots"]
-        best = best_hours(outlook["hour"], hours)
-        direction = outlook["direction"]
-        text_col, rose_col = st.columns([3, 2], gap="large", vertical_alignment="center")
-        text_col.html(
-            '<div class="trip-block">'
-            f'<div class="chapter-lead">Usually {low:.0f}–{high:.0f} kt, '
-            f"a {beaufort(middle)}</div>"
-            f'<div class="chapter-sub">Of your hours on the water, <b>{bands["good"]}%</b> '
-            f"have wind in your range, {bands['light']}% are too light and "
-            f"{bands['strong']}% too strong"
-            + (f". In range, it mostly comes from the <b>"
-               f"{compass_words(prevailing_direction(direction))}</b>" if len(direction) else "")
-            + f". Best between <b>{best[0]:02d}:00 and {best[-1]:02d}:59</b>.</div>"
-            + band_bar(bands) + "</div>"
-        )
-        headings, speeds = outlook["rose"]
-        if len(headings):
-            with rose_col:
-                rose = draw_rose(headings, speeds, ACTIVITIES[activity]["ladder"], "knots")
-                st.pyplot(rose, width="stretch")
-                plt.close(rose)
-                st.caption("Where the wind comes from in your hours on these dates.")
+        # The ranking: a row a spot, its details below on a click.
+        for place, key in enumerate(order):
+            lead = key in leaders and len(leaders) < len(totals)
+            rank = 1 + sum(total > totals[key] for total in totals.values()) if key in totals else None
+            tags = (["Best bet"] if lead else []) + (["This spot"] if key == where else [])
+            with st.container(horizontal=True, vertical_alignment="center",
+                              key=f"trip_row_{place}{'_on' if key == focus else ''}"):
+                st.html(trip_row(names[key], source_credit(spots[key]), outlooks[key], length,
+                                 rank, tags), width="stretch")
+                st.button("Shown below" if key == focus else "Details", key=f"trip_focus_{key}",
+                          type="tertiary", disabled=key == focus, on_click=focus_on, args=(key,))
+                # This spot stays: its × is there only to keep the rows in line.
+                st.button(":material/close:", key="trip_keep" if key == where else f"trip_drop_{key}",
+                          type="tertiary", disabled=key == where, help="Take it off the list",
+                          on_click=drop_compare, args=(key,))
 
-        # The air, and what that means you wear.
-        if outlook["air"] is not None:
-            st.html(
-                '<div class="trip-block">'
-                f'<div class="chapter-lead">Around {outlook["air"]:.0f} °C in your hours</div>'
-                '<div class="chapter-sub">Air, not water, on average over your dates. What to '
-                f"wear: <b>{kit_for(outlook['air'])}</b>.</div></div>"
-            )
-
-        # Should it disappoint: the same dates at your other spots, in a panel
-        # of its own that the button under the title leads down to.
-        with st.container(key="compare_panel"):
-            st.html(
-                '<div class="cmp-title" id="compare">Compare with other spots</div>'
-                '<div class="chapter-sub">Same dates, wind and hours, each spot in its own '
-                "local time.</div>"
-            )
-            ask_kind(st)
-            others = [key for key in comparable(spots) if key != where]
-            # The first look brings your nearest spots; after that, your picks.
-            if "trip_compare" not in st.session_state:
-                st.session_state["trip_compare"] = nearest_spots(spots, where, others)
-            chosen = [key for key in st.session_state["trip_compare"] if key in others]
-            chosen = chosen[:COMPARE_UP_TO]
-            st.session_state["trip_compare"] = chosen
-            new = st.session_state.get("compare_new")
-            room = COMPARE_UP_TO - len(chosen)
-            kind = STATION_NAMES[SOURCE] + " station" if STATION else MODEL_NAMES[SOURCE] + " cell"
-            st.caption(
-                (f"Click a dot to add it (room for {COUNT_WORDS[room].lower()} more), "
-                 if room else "Click an amber dot to take it off, ")
-                + f"or click anywhere else to download a new {kind}."
-            )
-            clicked = compare_map(spots, where, chosen, others, names, new)
-            if isinstance(clicked, tuple):
-                found = spot_at(*clicked)
-                if found is None:
-                    st.toast(f"{MODEL_NAMES[SOURCE]} has no data there.", icon=":material/info:")
-                elif spot_key(found) in spots:
-                    clicked = spot_key(found)
-                elif spot_key(found) not in (spot_key(spot), spot_key(new or {"lat": 0, "lon": 0})):
-                    st.session_state["compare_new"] = found
+        # Adding a spot: from your list, or anywhere on the map. Open by
+        # itself while there is nothing to compare with.
+        new = st.session_state.get("compare_new")
+        room = COMPARE_UP_TO - len(chosen)
+        if not (st.session_state.get("trip_adding") or not chosen or new):
+            st.button("Add a spot", icon=":material/add:", key="trip_add",
+                      on_click=st.session_state.__setitem__, args=("trip_adding", True))
+        else:
+            with st.container(key="trip_add_panel"):
+                st.html(
+                    '<div class="add-title">Add a spot</div>'
+                    + ("" if chosen else '<div class="chapter-sub">The same dates somewhere else '
+                       "may bring more wind. Set a second spot beside this one.</div>")
+                )
+                free = [key for key in others if key not in chosen]
+                if not room:
+                    st.caption(f"Up to {COMPARE_UP_TO + 1} spots side by side: take one off "
+                               "to add another.")
+                elif free:
+                    st.pills("From your spots", free, format_func=names.get, key="trip_add_pick",
+                             on_change=pick_compare)
+                kind = (STATION_NAMES[SOURCE] + " station" if STATION
+                        else MODEL_NAMES[SOURCE] + " cell")
+                st.caption(f"{'Or click' if room and free else 'Click'} the map: a dot adds or "
+                           f"takes off one of your spots, anywhere else downloads a new {kind}.")
+                clicked = compare_map(spots, where, chosen, others, names, new)
+                if isinstance(clicked, tuple):
+                    found = spot_at(*clicked)
+                    if found is None:
+                        st.toast(f"{MODEL_NAMES[SOURCE]} has no data there.", icon=":material/info:")
+                    elif spot_key(found) in spots:
+                        clicked = spot_key(found)
+                    elif spot_key(found) not in (spot_key(spot), spot_key(new or {"lat": 0, "lon": 0})):
+                        st.session_state["compare_new"] = found
+                        st.rerun()
+                if clicked in chosen:
+                    drop_compare(clicked)
                     st.rerun()
-            if clicked in others and clicked in chosen:
-                drop_compare(clicked)
-                st.rerun()
-            elif clicked in others and room:
-                st.session_state["trip_compare"] = [*chosen, clicked]
-                st.rerun()
-            elif clicked in others:
-                st.toast(f"Up to {COUNT_WORDS[COMPARE_UP_TO].lower()} spots: take one off first.",
-                         icon=":material/info:")
-            if new:
-                # The spot just clicked, not downloaded yet: fetch it here,
-                # and it joins the comparison.
-                with st.container(border=True, key="compare_new_panel"):
-                    st.markdown(
-                        f"**{spot_title(new)}**  \n:gray[{source_credit(new)} · "
-                        f"{coords_label(new['lat'], new['lon'])} · not downloaded yet. "
-                        f"{NEW_SPOT_NOTES[new['source']]}]"
-                    )
-                    slot = st.empty()
-                    with st.container(horizontal=True):
-                        go = st.button("Download and compare", type="primary",
-                                       icon=":material/download:", key="compare_fetch")
-                        if st.button("Never mind", type="tertiary", key="compare_drop"):
-                            st.session_state.pop("compare_new")
-                            st.rerun()
-                    if go:
-                        try:
-                            fetch_here(new, bar_in(slot))
-                        except Exception as error:
-                            slot.empty()
-                            st.error(f"Could not fetch that spot: {error}")
-                        else:
-                            remember_location(new)
-                            follow(new)
-                            st.session_state.pop("compare_new")
-                            if room:
-                                st.session_state["trip_compare"] = [*chosen, spot_key(new)]
-                            st.rerun()
-            compare_slots(chosen, others, spots, names)
-            if chosen:
-                with st.spinner("Reading your other spots..."):
-                    outlooks = {key: outlook_at(key) for key in [where, *chosen]}
-                totals = {
-                    key: typical_days(found["days"], length)
-                    for key, found in outlooks.items() if len(found["days"])
-                }
-                # Best first, your pick ahead of a tie; no record on these dates, last.
-                order = sorted(outlooks, key=lambda key: (-totals.get(key, -1), key != where))
-                top = max(totals.values())
-                leaders = [key for key in order if totals.get(key) == top]
-                bold = {key: f"<b>{html.escape(names[key])}</b>" for key in order}
-                if len(leaders) == len(totals) > 1:
-                    verdict = f"Much the same at each: {top} of {length} days."
-                elif leaders == [where]:
-                    verdict = f"{bold[where]} is the best of these: {top} of {length} days."
-                elif where in leaders:
-                    verdict = f"{joined([bold[key] for key in leaders])} share the most: {top} of {length} days."
-                else:
-                    verdict = (
-                        f"{joined([bold[key] for key in leaders])} "
-                        f"{'brings' if len(leaders) == 1 else 'bring'} the most: {top} of "
-                        f"{length} days, against {totals.get(where, 0)} at {bold[where]}."
-                    )
-                st.html(f'<div class="cmp-verdict">{verdict}</div>')
-                # Yours and up to three others: one row.
-                for column, key in zip(st.columns(COMPARE_UP_TO + 1, gap="small"), order):
-                    lead = key in leaders and len(leaders) < len(totals)
-                    tags = (["Your pick"] if key == where else []) + (["Most days"] if lead else [])
-                    # Spots on the same count share a place: 1, 1, 3.
-                    rank = (1 + sum(total > totals[key] for total in totals.values())
-                            if key in totals else None)
-                    with column.container(key=f"cmp_{'top_' if lead else ''}{order.index(key)}",
-                                          height="stretch"):
-                        st.html(compare_card(names[key], source_credit(spots[key]),
-                                             outlooks[key], length, rank, tags))
-                        if key != where:
-                            st.button(
-                                "Go here instead", key=f"trip_swap_{key}",
-                                icon=":material/swap_horiz:", width="stretch",
-                                on_click=swap_trip, args=(spots[key], key, where, chosen),
-                            )
+                elif clicked in others and room:
+                    add_compare(clicked)
+                    st.rerun()
+                elif clicked in others:
+                    st.toast(f"Up to {COMPARE_UP_TO + 1} spots side by side: take one off first.",
+                             icon=":material/info:")
+                if new:
+                    # The spot just clicked, not downloaded yet: fetch it here,
+                    # and it joins the comparison.
+                    with st.container(border=True, key="compare_new_panel"):
+                        st.markdown(
+                            f"**{spot_title(new)}**  \n:gray[{source_credit(new)} · "
+                            f"{coords_label(new['lat'], new['lon'])} · not downloaded yet. "
+                            f"{NEW_SPOT_NOTES[new['source']]}]"
+                        )
+                        slot = st.empty()
+                        with st.container(horizontal=True):
+                            go = st.button("Download and compare", type="primary",
+                                           icon=":material/download:", key="compare_fetch")
+                            if st.button("Never mind", type="tertiary", key="compare_drop"):
+                                st.session_state.pop("compare_new")
+                                st.rerun()
+                        if go:
+                            try:
+                                fetch_here(new, bar_in(slot))
+                            except Exception as error:
+                                slot.empty()
+                                st.error(f"Could not fetch that spot: {error}")
+                            else:
+                                remember_location(new)
+                                follow(new)
+                                st.session_state.pop("compare_new")
+                                add_compare(spot_key(new))
+                                st.rerun()
+                if chosen:
+                    st.button("Done", key="trip_add_done",
+                              on_click=st.session_state.__setitem__, args=("trip_adding", False))
 
-        st.divider()
-        st.caption(f"Local time at each spot · data at {names[where]}: {source_credit(entry)}")
+        # The spot in focus, in full: every year on record, the wind, the air.
+        found = outlooks[focus]
+        days = found["days"]
+        if focus in totals:
+            st.html(f'<div class="detail-title">{html.escape(names[focus])} in detail</div>')
+            rows = year_rows(days, dates)
+            if rows:
+                tally = {year: sum(kind == "g" for kind in kinds) for year, kinds in rows}
+                most, least = max(tally.values()), min(tally.values())
+                tops = [year for year in tally if tally[year] == most]
+                lows = [year for year in tally if tally[year] == least]
+                st.html(
+                    '<div class="trip-block"><div class="chapter-lead">'
+                    + (f"{most} of {length} days, every year" if most == least else
+                       f"Between {least} and {most} of {length} days a year")
+                    + '</div><div class="chapter-sub">One row per year, a dot per day, lit when '
+                    "your wind came."
+                    + ("" if most == least else
+                       f" <b>{most}</b> in {years_named(tops, len(tally))}; the leanest, "
+                       f"{years_named(lows, len(tally))}, had <b>{least}</b>.")
+                    + "</div>"
+                    + dot_rows([
+                        (year, kinds, tally[year], f"{year}: {tally[year]} of {length} days",
+                         most != least and year in tops and len(tops) <= 3)
+                        for year, kinds in rows
+                    ])
+                    + "</div>"
+                )
+
+            # The wind: how hard, how often right, from where, best when.
+            bands = wind_bands(found)
+            low, middle, high = found["knots"]
+            best = best_hours(found["hour"], hours)
+            direction = found["direction"]
+            text_col, rose_col = st.columns([3, 2], gap="large", vertical_alignment="center")
+            text_col.html(
+                '<div class="trip-block">'
+                f'<div class="chapter-lead">Usually {low:.0f}–{high:.0f} kt, '
+                f"a {beaufort(middle)}</div>"
+                f'<div class="chapter-sub">Of your hours on the water, <b>{bands["good"]}%</b> '
+                f"have wind in your range, {bands['light']}% are too light and "
+                f"{bands['strong']}% too strong"
+                + (f". In range, it mostly comes from the <b>"
+                   f"{compass_words(prevailing_direction(direction))}</b>" if len(direction) else "")
+                + f". Best between <b>{best[0]:02d}:00 and {best[-1]:02d}:59</b>.</div>"
+                + band_bar(bands) + "</div>"
+            )
+            headings, speeds = found["rose"]
+            if len(headings):
+                with rose_col:
+                    rose = draw_rose(headings, speeds, ACTIVITIES[activity]["ladder"], "knots")
+                    st.pyplot(rose, width="stretch")
+                    plt.close(rose)
+                    st.caption("Where the wind comes from in your hours on these dates.")
+
+            # The air, and what that means you wear.
+            if found["air"] is not None:
+                st.html(
+                    '<div class="trip-block">'
+                    f'<div class="chapter-lead">Around {found["air"]:.0f} °C in your hours</div>'
+                    '<div class="chapter-sub">Air, not water, on average over your dates. What to '
+                    f"wear: <b>{kit_for(found['air'])}</b>.</div></div>"
+                )
     small_print()
     st.stop()
 
