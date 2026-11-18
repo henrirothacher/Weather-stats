@@ -196,39 +196,40 @@ st.html(
             pointer-events: auto; animation: riseIn .5s cubic-bezier(.2, .7, .2, 1) both;
         }
     }
-    .landing-title {
+    .stage-title {
         font-size: clamp(2.4rem, 4.2vw, 4.4rem); font-weight: 800; line-height: 1;
         letter-spacing: -.04em; color: #e7ebf3;
     }
-    .landing-title span { color: #5eead4; }
-    .landing-sub {
+    .stage-title span { color: #5eead4; }
+    .stage-sub {
         font-size: 1.05rem; line-height: 1.55; color: #a7b1c4; margin-top: .9rem;
         max-width: 54ch;
     }
-    /* Four figures on what a click brings, which change with the source. */
-    .landing-facts {
+    /* Four figures under a stage's title: on the landing what a click
+       brings, from the source picked; on the trip the spot in focus. */
+    .fact-boxes {
         display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .6rem;
     }
     @media (max-width: 640px) {
-        .landing-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .fact-boxes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
-    .landing-facts div {
+    .fact-boxes div {
         border: 1px solid #273043; border-left: 3px solid #2dd4bf; border-radius: 4px;
         background: rgba(18, 22, 31, .72); padding: .7rem .85rem;
     }
-    .landing-facts div:nth-child(2n) { border-left-color: #7dd3fc; }
-    .landing-facts b {
+    .fact-boxes div:nth-child(2n) { border-left-color: #7dd3fc; }
+    .fact-boxes b {
         display: block; font-size: 1.45rem; font-weight: 800; letter-spacing: -.02em;
         color: #e7ebf3; white-space: nowrap;
     }
-    .landing-facts span {
+    .fact-boxes span {
         display: block; font-size: .68rem; letter-spacing: .1em; text-transform: uppercase;
         line-height: 1.35; color: #8a94a8; margin-top: .15rem;
     }
     /* A window too short for all of it keeps the title smaller. */
     @media (min-width: 1100px) and (max-height: 820px) {
-        .landing-title { font-size: clamp(2.2rem, 3.4vw, 3.4rem); }
-        .landing-sub { font-size: .98rem; margin-top: .6rem; }
+        .stage-title { font-size: clamp(2.2rem, 3.4vw, 3.4rem); }
+        .stage-sub { font-size: .98rem; margin-top: .6rem; }
     }
     .landing-hint {
         display: inline-flex; align-items: center; gap: .55rem;
@@ -1795,7 +1796,9 @@ WIND_FLOW_SCRIPT = """
 # The landing map's height on a phone or narrow window. On a wide one the
 # page styles stretch its frame to the window, and FILL_FRAME_CSS, inside the
 # frame, has the map follow: streamlit_folium otherwise fixes it in pixels.
+# The trip's map stage is sized the same way (see "trip_stage" in its styles).
 LANDING_MAP_HEIGHT = 700
+TRIP_MAP_HEIGHT = 620
 FILL_FRAME_CSS = """
 <style>
 #map_div, #map_div2 { height: 100vh !important; }
@@ -1804,10 +1807,11 @@ html, body { overflow: hidden; }
 """
 
 
-def landing_map(**options):
-    """The landing's map: the house map, filling whatever frame it is given."""
-    world = base_map(control_scale=True, min_zoom=2, world_copy_jump=True,
-                     zoom_control="bottomright", **options)
+def stage_map(**options):
+    """A map that is a page's stage, the landing's or the trip's: the house
+    map, filling whatever frame the page styles give it."""
+    world = base_map(**{"control_scale": True, "min_zoom": 2, "world_copy_jump": True,
+                        "zoom_control": "bottomright", **options})
     world.get_root().header.add_child(folium.Element(FILL_FRAME_CSS))
     return world
 
@@ -2098,12 +2102,12 @@ if st.session_state["spot"] is None:
         pick_slot = st.container(key="landing_pick")
 
     hero.html(
-        '<div class="landing-title">Hourly wind history<br>for <span>any spot</span></div>'
-        f'<div class="landing-sub">{pitch} Then see how often it is sailable for you, '
+        '<div class="stage-title">Hourly wind history<br>for <span>any spot</span></div>'
+        f'<div class="stage-sub">{pitch} Then see how often it is sailable for you, '
         "or compare it with other spots on the dates you are going.</div>"
     )
     hero.html(
-        '<div class="landing-facts">'
+        '<div class="fact-boxes">'
         + "".join(f"<div><b>{value}</b><span>{label}</span></div>" for value, label in facts)
         + "</div>"
     )
@@ -2150,7 +2154,7 @@ if st.session_state["spot"] is None:
         if source in CELL_GRIDS:
             grid = CELL_GRIDS[source]
             home, far = CELL_VIEWS[source]
-            world = landing_map(location=list(centre or home), zoom_start=7 if centre else far)
+            world = stage_map(location=list(centre or home), zoom_start=7 if centre else far)
             if source == "arome":
                 # The model stops at the outline; a click past it finds nothing.
                 south, north, west, east = AROME_AREA
@@ -2189,7 +2193,7 @@ if st.session_state["spot"] is None:
             )
         else:
             focus = tuple(stations.loc[picked, ["lat", "lon"]]) if picked else centre or SWISS_CENTRE
-            world = landing_map(
+            world = stage_map(
                 location=list(focus), zoom_start=10 if picked or centre else STATION_ZOOM[source])
             hint = (
                 "Click another station to switch" if picked
@@ -3349,12 +3353,52 @@ ANSWER_CSS = """
 .dot-count { font-size: .8rem; font-weight: 700; text-align: right; color: #e7ebf3; font-variant-numeric: tabular-nums; }
 
 
-/* The trip planner. */
-.trip-title {
-    margin-top: .45rem; font-size: clamp(1.8rem, 3.6vw, 2.6rem); font-weight: 700;
-    line-height: 1.1; letter-spacing: -.02em;
+/* The trip planner's answer on a map stage, as on the landing: the map
+   across the page with your spots on it, each with its days; the title,
+   the verdict and the four figures of the spot in focus float on its left,
+   with a shade behind them so they read. Whether they float depends on the
+   room the page has beside the filter, so it is asked of the stage itself.
+   With too little they stack above a shorter map. */
+.st-key-trip_stage {
+    container-type: inline-size; position: relative; gap: 0 !important;
+    animation: stageIn 1s cubic-bezier(.2, .7, .2, 1) both;
 }
+@media (min-width: 1000px) {
+    .st-key-trip_stage {
+        margin: -.4rem -3rem 0; flex: none !important;
+        width: calc(100% + 6rem) !important; max-width: none !important;
+    }
+}
+.st-key-trip_map { position: relative; }
+.st-key-trip_map iframe { display: block; height: 360px !important; border-radius: 0; }
+.st-key-trip_hero { gap: 1rem; padding: .6rem 0 1.4rem; }
+.st-key-trip_hero .stage-title { font-size: clamp(2.1rem, 5.2cqi, 3.6rem); }
+.stage-verdict {
+    margin-top: 1rem; font-size: 1.15rem; font-weight: 600; line-height: 1.45; color: #e7ebf3;
+}
+.stage-verdict b { color: #2dd4bf; }
+.facts-for { margin-bottom: .55rem; font-size: .82rem; color: #8a94a8; }
+.facts-for b { color: #e7ebf3; }
+.stage-rule { font-size: .86rem; line-height: 1.5; color: #8a94a8; }
+.stage-rule b { color: #a7b1c4; }
+@container (min-width: 860px) {
+    .st-key-trip_map iframe { height: 620px !important; }
+    .st-key-trip_map::after {
+        content: ""; position: absolute; inset: 0; z-index: 4; pointer-events: none;
+        background: linear-gradient(90deg, rgba(10, 13, 20, .93) 0,
+                                    rgba(10, 13, 20, .76) 42%, rgba(10, 13, 20, 0) 70%);
+    }
+    .st-key-trip_hero {
+        position: absolute; z-index: 5; top: 2.4rem; left: 3rem; width: min(600px, 54%);
+        padding: 0; animation: riseIn .8s cubic-bezier(.2, .7, .2, 1) .2s both;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .st-key-trip_stage, .st-key-trip_hero { animation: none; }
+}
+.st-key-trip_result { margin-top: 1.6rem; }
 .trip-block { margin-top: 1.5rem; }
+.trip-block:first-child { margin-top: .4rem; }
 .band {
     display: flex; gap: 2px; max-width: 620px; height: 14px; margin-top: 1rem;
     border-radius: 7px; overflow: hidden; background: #12161f;
@@ -3368,8 +3412,6 @@ ANSWER_CSS = """
 
 /* The ranking: a row a spot, best first, the one shown in detail edged
    in teal. Rank, name, days in a typical year with a meter, the wind. */
-.cmp-verdict { margin: .2rem 0 1rem; font-size: 1.1rem; font-weight: 600; color: #e7ebf3; }
-.cmp-verdict b { color: #2dd4bf; }
 [class*="st-key-trip_row_"] {
     padding: .75rem .6rem .75rem 1rem !important; border: 1px solid #273043;
     border-radius: 10px; background: #10141c;
@@ -3411,9 +3453,11 @@ ANSWER_CSS = """
     border: 1px dashed #2dd4bf; border-radius: 10px; background: #0c1017;
 }
 .add-title { font-size: 1.15rem; font-weight: 700; color: #e7ebf3; }
+/* The spot in focus in full: its heading above the chapters under it. */
 .detail-title {
-    margin-top: 2.2rem; padding-top: 1.4rem; border-top: 1px solid #273043;
-    font-size: 1.5rem; font-weight: 700; letter-spacing: -.01em; color: #e7ebf3;
+    margin-top: 2.4rem; padding-top: 1.6rem; border-top: 1px solid #273043;
+    font-size: clamp(1.8rem, 3vw, 2.3rem); font-weight: 800; line-height: 1.1;
+    letter-spacing: -.03em; color: #e7ebf3;
 }
 
 </style>
@@ -3970,6 +4014,111 @@ def trip_row(name, credit, outlook, length, rank, tags):
     )
 
 
+# Your spots on the trip's map stage: each a bubble with its days with your
+# wind in a typical year and its name beside it. The best bet is filled in
+# teal, your own spot's name edged in teal, the one in focus ringed.
+TRIP_PIN_CSS = """
+<style>
+.trip-pin {
+    position: absolute; left: -18px; top: -18px; display: flex; align-items: center;
+    gap: 7px; white-space: nowrap; cursor: pointer;
+    font: 600 12px/1.2 Inter, system-ui, sans-serif; color: #e7ebf3;
+}
+.trip-pin b {
+    display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%;
+    background: #12161f; border: 2px solid #7dd3fc; font-size: 15px; font-weight: 800;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .5);
+}
+.trip-pin.best b { background: #2dd4bf; border-color: #2dd4bf; color: #0a0d14; }
+.trip-pin.focus b { outline: 3px solid rgba(231, 235, 243, .8); outline-offset: 2px; }
+.trip-pin span {
+    padding: 4px 9px; border-radius: 999px; border: 1px solid #273043;
+    background: rgba(10, 13, 20, .88);
+}
+.trip-pin.here span { border-color: #2dd4bf; }
+/* A phone's map is too narrow for whole names; the ranking has them. */
+@media (max-width: 520px) {
+    .trip-pin span { max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
+}
+</style>
+"""
+
+# Fits the trip's map to your spots in the part of it the answer leaves
+# clear: right of the title on a wide page, all of it on a narrow one. Runs
+# in the page, like the landing's wind, and fits each new map once, so a pan
+# or zoom of yours stays. Same rule: no "<" before a letter, "/" or "!".
+TRIP_FIT_SCRIPT = """
+<script>
+(() => {
+  if (window.__tripFit) return;
+  window.__tripFit = true;
+  let fitted = null;
+  const fit = () => {
+    const frame = document.querySelector(
+      '.st-key-trip_map iframe[title="streamlit_folium.st_folium"]');
+    const view = frame && frame.contentWindow;
+    const map = view && view.map;
+    if (!map || !view.L || map === fitted || !map.getContainer().isConnected) return;
+    const points = [];
+    map.eachLayer((layer) => { if (layer.getLatLng) points.push(layer.getLatLng()); });
+    if (points.length === 0) return;
+    fitted = map;
+    const hero = document.querySelector(".st-key-trip_hero");
+    const floating = hero && getComputedStyle(hero).position === "absolute";
+    const left = floating
+      ? hero.getBoundingClientRect().right - frame.getBoundingClientRect().left + 50 : 50;
+    // Names run to the right of their bubbles, hence the room on that side.
+    map.fitBounds(view.L.latLngBounds(points), {
+      paddingTopLeft: [left, 70], paddingBottomRight: [floating ? 230 : 160, 50],
+      maxZoom: 8, animate: false,
+    });
+  };
+  setInterval(fit, 250);
+  fit();
+})();
+</script>
+"""
+
+
+def trip_stage_map(spots, order, best, where, focus, names, totals):
+    """The trip's map stage: your spots in `order`, each with its days in a
+    typical year (see TRIP_PIN_CSS). Returns the key of a spot just clicked,
+    or None."""
+    lats = [spots[key]["lat"] for key in order]
+    lons = [spots[key]["lon"] for key in order]
+    # No scale: it would sit under the answer, and distance is not the point.
+    world = stage_map(location=[sum(lats) / len(lats), sum(lons) / len(lons)], zoom_start=5,
+                      control_scale=False)
+    world.get_root().header.add_child(folium.Element(TRIP_PIN_CSS))
+    # Fitted again in the page with room for the answer (TRIP_FIT_SCRIPT).
+    world.fit_bounds([[min(lats), min(lons)], [max(lats), max(lons)]], max_zoom=8)
+    for key in order:
+        kinds = " ".join(["trip-pin"] + [kind for kind, on in (
+            ("best", key in best), ("here", key == where), ("focus", key == focus)) if on])
+        folium.Marker(
+            [spots[key]["lat"], spots[key]["lon"]],
+            icon=folium.DivIcon(
+                html=f'<div class="{kinds}"><b>{totals.get(key, "–")}</b>'
+                     f"<span>{html.escape(names[key])}</span></div>",
+                icon_size=(0, 0), icon_anchor=(0, 0),
+            ),
+        ).add_to(world)
+    result = st_folium(
+        world, height=TRIP_MAP_HEIGHT, use_container_width=True, key="trip_stage_map",
+        returned_objects=["last_object_clicked", "last_object_clicked_count"],
+    ) or {}
+    # st_folium replays the last click on every rerun: only a new one counts.
+    count = result.get("last_object_clicked_count") or 0
+    if count == st.session_state.get("trip_pin_seen", 0):
+        return None
+    st.session_state["trip_pin_seen"] = count
+    dot = result.get("last_object_clicked")
+    if not dot:
+        return None
+    return min(order, key=lambda key: (spots[key]["lat"] - dot["lat"]) ** 2
+               + (spots[key]["lon"] - dot["lng"]) ** 2)
+
+
 if st.session_state["mode"] == "window":
     st.html(ANSWER_CSS)
     spots = my_locations(with_record=True)
@@ -4019,38 +4168,79 @@ if st.session_state["mode"] == "window":
     if focus not in outlooks:
         focus = where
 
-    with st.container(key="trip_result"):
-        with st.container(horizontal=True, vertical_alignment="center"):
-            st.html(f'<div class="trip-title">Your wind on {dates_label(dates)}</div>',
-                    width="stretch")
-            if st.button("Change dates", icon=":material/edit_calendar:", key="trip_redate"):
-                st.session_state["trip_step"] = 0
-                st.rerun()
-        span = "every year on record" if years_back is None else f"the last {years_back} years"
-        bold = {key: f"<b>{html.escape(names[key])}</b>" for key in order}
-        if len(totals) < 2:
-            verdict = ""
-        elif len(leaders) == len(totals):
-            verdict = f"Much the same at each: {top} of {length} days."
-        elif leaders == [where]:
-            verdict = f"{bold[where]} is your best bet: {top} of {length} days."
-        elif where in leaders:
-            verdict = f"{joined([bold[key] for key in leaders])} share the most: {top} of {length} days."
-        else:
-            verdict = (
-                f"{joined([bold[key] for key in leaders])} "
-                f"{'brings' if len(leaders) == 1 else 'bring'} the most: {top} of {length} "
-                f"days, against {totals.get(where, 0)} at {bold[where]}."
-            )
-        st.html(
-            f'<div class="chapter-sub">Days with <b>{wind_words(wind)}</b> for {lasting} h in a '
-            f"row {within}, in a typical year of {span}, each spot in its own local time."
-            f'</div><div class="cmp-verdict">{verdict}</div>'
+    # The best bet stands out only where it beats someone.
+    best = [key for key in leaders if len(leaders) < len(totals)]
+    span = "every year on record" if years_back is None else f"the last {years_back} years"
+    bold = {key: f"<b>{html.escape(names[key])}</b>" for key in order}
+    out_of = f"of your {length} days"
+    if not totals:
+        verdict = "No record on these dates yet: pick other dates, or another spot."
+    elif len(totals) == 1:
+        only = next(iter(totals))
+        verdict = f"{totals[only]} {out_of} at {bold[only]}."
+    elif not best:
+        verdict = f"Much the same at each: {top} {out_of}."
+    elif best == [where]:
+        verdict = f"{bold[where]} is your best bet: {top} {out_of}."
+    elif where in best:
+        verdict = f"{joined([bold[key] for key in best])} share the most: {top} {out_of}."
+    else:
+        verdict = (
+            f"{joined([bold[key] for key in best])} "
+            f"{'has' if len(best) == 1 else 'have'} the most wind: {top} {out_of}, "
+            + (f"against {totals[where]} at {bold[where]}." if where in totals
+               else f"and {bold[where]} has no record on these dates.")
         )
 
+    # --- The stage: your spots on the map, the answer floating on it ---
+    with st.container(key="trip_stage"):
+        hero = st.container(key="trip_hero")
+        map_slot = st.container(key="trip_map")
+    hero.html(
+        f'<div class="stage-title">Your wind on<br><span>{dates_label(dates)}</span></div>'
+        f'<div class="stage-verdict">{verdict}</div>'
+    )
+    # Four figures for the spot in focus, yours until you pick another.
+    found = outlooks[focus]
+    if focus in totals:
+        low, middle, high = found["knots"]
+        figures = [
+            (f"{totals[focus]} of {length}", "days with your wind"),
+            (f"{low:.0f}–{high:.0f} kt", beaufort(middle)),
+            (prevailing_direction(found["direction"]) if len(found["direction"]) else "–",
+             "wind from, in range"),
+            (f"{found['air']:.0f} °C", f"air · {kit_for(found['air'])}")
+            if found["air"] is not None else ("–", "no air temperature"),
+        ]
+    else:
+        figures = [("–", "no record on these dates")] * 4
+    hero.html(
+        f'<div class="facts-for">At <b>{html.escape(names[focus])}</b>'
+        + (" · click another spot on the map for its own" if len(order) > 1 else "")
+        + '</div><div class="fact-boxes">'
+        + "".join(f"<div><b>{value}</b><span>{label}</span></div>" for value, label in figures)
+        + "</div>"
+    )
+    with hero.container(horizontal=True, vertical_alignment="center", gap="medium"):
+        st.html(
+            f'<div class="stage-rule">Days with <b>{wind_words(wind)}</b> for {lasting} h in a '
+            f"row {within}, in a typical year of {span}, each spot in its own local time.</div>",
+            width="stretch",
+        )
+        if st.button("Change dates", icon=":material/edit_calendar:", key="trip_redate"):
+            st.session_state["trip_step"] = 0
+            st.rerun()
+    with map_slot:
+        picked = trip_stage_map(spots, order, best, where, focus, names, totals)
+    if picked is not None and picked != focus:
+        focus_on(picked)
+        st.rerun()
+    st.html(TRIP_FIT_SCRIPT, unsafe_allow_javascript=True)
+
+    with st.container(key="trip_result"):
         # The ranking: a row a spot, its details below on a click.
         for place, key in enumerate(order):
-            lead = key in leaders and len(leaders) < len(totals)
+            lead = key in best
             rank = 1 + sum(total > totals[key] for total in totals.values()) if key in totals else None
             tags = (["Best bet"] if lead else []) + (["This spot"] if key == where else [])
             with st.container(horizontal=True, vertical_alignment="center",
@@ -4140,23 +4330,28 @@ if st.session_state["mode"] == "window":
                     st.button("Done", key="trip_add_done",
                               on_click=st.session_state.__setitem__, args=("trip_adding", False))
 
-        # The spot in focus, in full: every year on record, the wind, the air.
+        # The spot in focus, in full: every year on record, the wind and the
+        # air beside the rose of where it comes from.
         found = outlooks[focus]
         days = found["days"]
         if focus in totals:
             st.html(f'<div class="detail-title">{html.escape(names[focus])} in detail</div>')
+            text_col, rose_col = st.columns([3, 2], gap="large")
             rows = year_rows(days, dates)
             if rows:
                 tally = {year: sum(kind == "g" for kind in kinds) for year, kinds in rows}
                 most, least = max(tally.values()), min(tally.values())
                 tops = [year for year in tally if tally[year] == most]
                 lows = [year for year in tally if tally[year] == least]
-                st.html(
-                    '<div class="trip-block"><div class="chapter-lead">'
-                    + (f"{most} of {length} days, every year" if most == least else
-                       f"Between {least} and {most} of {length} days a year")
-                    + '</div><div class="chapter-sub">One row per year, a dot per day, lit when '
-                    "your wind came."
+                if most == least:
+                    lead = (f"All {length} days, every year" if most == length
+                            else f"{most} of your {length} days, every year")
+                else:
+                    lead = f"{least} to {most} of your {length} days, depending on the year"
+                text_col.html(
+                    f'<div class="trip-block"><div class="chapter-lead">{lead}</div>'
+                    '<div class="chapter-sub">One row per year, a dot per day, lit when your '
+                    "wind came."
                     + ("" if most == least else
                        f" <b>{most}</b> in {years_named(tops, len(tally))}; the leanest, "
                        f"{years_named(lows, len(tally))}, had <b>{least}</b>.")
@@ -4172,9 +4367,8 @@ if st.session_state["mode"] == "window":
             # The wind: how hard, how often right, from where, best when.
             bands = wind_bands(found)
             low, middle, high = found["knots"]
-            best = best_hours(found["hour"], hours)
+            best_time = best_hours(found["hour"], hours)
             direction = found["direction"]
-            text_col, rose_col = st.columns([3, 2], gap="large", vertical_alignment="center")
             text_col.html(
                 '<div class="trip-block">'
                 f'<div class="chapter-lead">Usually {low:.0f}–{high:.0f} kt, '
@@ -4184,9 +4378,17 @@ if st.session_state["mode"] == "window":
                 f"{bands['strong']}% too strong"
                 + (f". In range, it mostly comes from the <b>"
                    f"{compass_words(prevailing_direction(direction))}</b>" if len(direction) else "")
-                + f". Best between <b>{best[0]:02d}:00 and {best[-1]:02d}:59</b>.</div>"
+                + f". Best between <b>{best_time[0]:02d}:00 and {best_time[-1]:02d}:59</b>.</div>"
                 + band_bar(bands) + "</div>"
             )
+            # The air, and what that means you wear.
+            if found["air"] is not None:
+                text_col.html(
+                    '<div class="trip-block">'
+                    f'<div class="chapter-lead">Around {found["air"]:.0f} °C in your hours</div>'
+                    '<div class="chapter-sub">Air, not water, on average over your dates. What to '
+                    f"wear: <b>{kit_for(found['air'])}</b>.</div></div>"
+                )
             headings, speeds = found["rose"]
             if len(headings):
                 with rose_col:
@@ -4194,15 +4396,6 @@ if st.session_state["mode"] == "window":
                     st.pyplot(rose, width="stretch")
                     plt.close(rose)
                     st.caption("Where the wind comes from in your hours on these dates.")
-
-            # The air, and what that means you wear.
-            if found["air"] is not None:
-                st.html(
-                    '<div class="trip-block">'
-                    f'<div class="chapter-lead">Around {found["air"]:.0f} °C in your hours</div>'
-                    '<div class="chapter-sub">Air, not water, on average over your dates. What to '
-                    f"wear: <b>{kit_for(found['air'])}</b>.</div></div>"
-                )
     small_print()
     st.stop()
 
