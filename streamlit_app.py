@@ -1716,13 +1716,18 @@ WIND_FLOW_SCRIPT = """
     let w = 0, h = 0, world = 256, moving = false, particles = [];
 
     // Each trail is its own last positions, redrawn every frame, so nothing
-    // is left behind on the map. A trail that has run its course stops
-    // growing and shrinks away from its tail, then starts again elsewhere.
+    // is left behind on the map. They are kept in a ring that is written
+    // over, so moving them makes nothing for the browser to clear away, which
+    // would pause the wind now and then. A trail that has run its course
+    // stops growing and shrinks away from its tail, then starts again
+    // elsewhere. `head` is where its next position goes, `n` how many it has.
     const TRAIL = 110;
-    const spawn = (p) => Object.assign(p || {}, {
-      x: Math.random() * w, y: Math.random() * h,
-      age: 0, life: 500 + Math.random() * 700, trail: [],
-    });
+    const spawn = (p) => {
+      p = p || { xs: new Float32Array(TRAIL), ys: new Float32Array(TRAIL) };
+      p.x = Math.random() * w; p.y = Math.random() * h;
+      p.age = 0; p.life = 500 + Math.random() * 700; p.head = 0; p.n = 0;
+      return p;
+    };
     const place = () => {
       const size = map.getSize();
       w = size.x; h = size.y;
@@ -1744,12 +1749,13 @@ WIND_FLOW_SCRIPT = """
     // easterlies beyond. The belts follow the sun a few degrees north and
     // south through the year, less so towards the poles. A slow wobble tied
     // to the earth keeps them from looking like stripes and turns the calms
-    // into light air from anywhere. In pixels a frame, from x and y in the
-    // map's world pixels, and never faster than 0.32, as before.
+    // into light air from anywhere. Sets `driftX` and `driftY`, in pixels a
+    // step, from x and y in the map's world pixels; never faster than 0.32.
     const today = new Date();
     const day = (today - new Date(today.getFullYear(), 0, 1)) / 864e5;
     // Furthest north in early August, furthest south in early February.
     const sun = 4 + 4 * Math.cos(2 * Math.PI * (day - 220) / 365);
+    let driftX = 0, driftY = 0;
     const field = (x, y) => {
       const lat = Math.atan(Math.sinh(Math.PI * (1 - 2 * y / world))) * 180 / Math.PI;
       const turn = 2 * Math.PI * x / world;
@@ -1767,52 +1773,86 @@ WIND_FLOW_SCRIPT = """
       const north = -side * 0.45 * belt + 0.3 * Math.sin(2.5 * wobble);
       const angle = Math.atan2(north, east) + 0.2 * wobble;
       const speed = 0.05 + 0.27 * strength * Math.abs(belt);
-      return [Math.cos(angle) * speed, -Math.sin(angle) * speed];
+      driftX = Math.cos(angle) * speed;
+      driftY = -Math.sin(angle) * speed;
     };
 
     map.on("movestart zoomstart", () => { moving = true; ctx.clearRect(0, 0, w, h); });
     map.on("moveend zoomend resize", () => { moving = false; place(); });
     place();
 
-    // Trails are drawn in bands from tail to head, each a little brighter,
-    // so they fade towards the tail: one stroke per band, not per trail.
-    const BANDS = 5;
-    const step = () => {
-      if (!canvas.isConnected || attached !== map) return;
-      view.requestAnimationFrame(step);
-      if (moving) return;
-      ctx.clearRect(0, 0, w, h);
-      const off = map.containerPointToLayerPoint([0, 0]).add(map.getPixelOrigin());
+    // One step of the wind: every trail moves on, or, run its course or off
+    // the map, loses its tail. `off` turns the canvas's pixels into the map's.
+    const advance = (off) => {
       for (const p of particles) {
-        const out = p.x > w || p.y > h || p.x < 0 || p.y < 0;
-        if (p.age > p.life || out) {
-          p.trail.shift();
-          if (p.trail.length === 0) spawn(p);
+        if (p.age > p.life || p.x > w || p.y > h || p.x < 0 || p.y < 0) {
+          p.n -= 1;
+          if (p.n <= 0) spawn(p);
           continue;
         }
-        const [dx, dy] = field(p.x + off.x, p.y + off.y);
-        p.trail.push([p.x, p.y]);
-        if (p.trail.length > TRAIL) p.trail.shift();
-        p.x += dx; p.y += dy;
+        field(p.x + off.x, p.y + off.y);
+        p.xs[p.head] = p.x; p.ys[p.head] = p.y;
+        p.head = (p.head + 1) % TRAIL;
+        if (p.n < TRAIL) p.n += 1;
+        p.x += driftX; p.y += driftY;
         p.age += 1;
       }
+    };
+
+    // Trails are drawn in bands from tail to head, each a little brighter,
+    // so they fade towards the tail: one stroke per band, not per trail.
+    // Every other position is enough for curves this gentle, and halves the
+    // drawing, which is what a sharp screen slows down on.
+    const BANDS = 5;
+    const draw = () => {
+      ctx.clearRect(0, 0, w, h);
       ctx.lineWidth = 1.1;
       ctx.lineCap = "round";
       for (let band = 0; band < BANDS; band++) {
         ctx.strokeStyle = "rgba(214, 233, 255, " + (0.09 * (band + 1)) + ")";
         ctx.beginPath();
         for (const p of particles) {
-          const n = p.trail.length;
+          const n = p.n;
           const from = Math.floor(n * band / BANDS);
           const to = Math.min(n - 1, Math.floor(n * (band + 1) / BANDS));
           if (to - from < 1) continue;
-          ctx.moveTo(p.trail[from][0], p.trail[from][1]);
-          for (let i = from + 1; i <= to; i++) ctx.lineTo(p.trail[i][0], p.trail[i][1]);
+          // The oldest position, counted on a lap so the index stays positive.
+          const oldest = p.head - n + TRAIL;
+          let k = (oldest + from) % TRAIL;
+          ctx.moveTo(p.xs[k], p.ys[k]);
+          for (let i = from + 2; i < to; i += 2) {
+            k = (oldest + i) % TRAIL;
+            ctx.lineTo(p.xs[k], p.ys[k]);
+          }
+          k = (oldest + to) % TRAIL;
+          ctx.lineTo(p.xs[k], p.ys[k]);
         }
         ctx.stroke();
       }
     };
-    view.requestAnimationFrame(step);
+
+    // The wind runs on the clock, sixty steps a second, not one step a
+    // frame: a screen that draws faster, slower or unevenly (a laptop that
+    // changes its refresh rate, a busy moment) shows it at the same speed.
+    // Whole steps only, as many as the time since the last frame rounds to,
+    // the rest carried over. After a long pause, a hidden tab say, it takes
+    // up to four and lets the rest go, rather than racing to catch up.
+    const TICK = 1000 / 60;
+    let last = 0, owed = 0;
+    const frame = (now) => {
+      if (!canvas.isConnected || attached !== map) return;
+      view.requestAnimationFrame(frame);
+      if (moving || !last) { last = now; return; }
+      owed += now - last;
+      last = now;
+      let steps = Math.round(owed / TICK);
+      if (steps > 4) { steps = 4; owed = 0; } else { owed -= steps * TICK; }
+      if (!steps) return;
+      const off = map.containerPointToLayerPoint([0, 0]).add(map.getPixelOrigin());
+      for (let i = 0; i < steps; i++) advance(off);
+      draw();
+    };
+    view.requestAnimationFrame(frame);
   }
 })();
 </script>
