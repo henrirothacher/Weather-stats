@@ -2435,8 +2435,7 @@ if dataset_path.exists() and "fetch_first" not in st.session_state:
 
 
 # --- Stage 2: make sure this location has data ----------------------------
-# The free sources start downloading the moment you arrive, nothing to
-# press; ERA5 waits for how far back you want, and for a Copernicus account.
+# Every source starts downloading the moment you arrive: nothing to press.
 
 
 def back_to_map():
@@ -2963,10 +2962,10 @@ if st.session_state["mode"] is None:
 
 
 # --- The filter and the trip's dates -------------------------------------
-# The trip planner asks one question, your dates; the rest of its filter,
-# and which spots it compares, is in the sidebar beside the answer. The rating
-# has the same sidebar, and the settings share their keys, so one given in
-# either view is already there in the other.
+# The trip planner asks one question, your dates; the rest of its filter is
+# in the sidebar beside the answer, and the spots it compares are picked on
+# the page. The rating has the same sidebar, and the settings share their
+# keys, so one given in either view is already there in the other.
 
 # Where the trip's dates start before you pick: these days of next month.
 TRIP_DAYS = (10, 16)
@@ -3281,9 +3280,9 @@ def ask_trip_dates(title, default):
 
 def settings(mode):
     """The sidebar inside a view: what you sail, then the filter the view
-    counts days with, in two groups, the wind and the time. Its widgets
-    share their keys with the questions, so an answer and its setting are
-    one value. Returns what you sail."""
+    counts days with: your wind, your time, the comfort where the record has
+    the air temperature, and in the trip planner which kind of spots to
+    compare. Returns what you sail."""
     side = st.sidebar
     side.header("Filter")
     side.caption("A day counts when all of this holds at once, for your hours in a row.")
@@ -3377,8 +3376,6 @@ ANSWER_CSS = """
     color: #a7b1c4;
 }
 .chapter-sub b { color: #e7ebf3; }
-/* Orange and blue stepped to sit in the dark-mode lightness band and stay
-   apart under colour blindness (checked in OKLab on the background). */
 .legend { display: flex; flex-wrap: wrap; gap: .4rem 1.2rem; margin-top: 1rem; font-size: .8rem; color: #8a94a8; }
 .legend span::before {
     content: ""; display: inline-block; width: .6rem; height: .6rem; margin-right: .45rem;
