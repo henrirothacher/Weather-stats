@@ -30,7 +30,7 @@ st.set_page_config(
 )
 
 # Goes up by 0.1 with every commit pushed to GitHub (3.0 -> 3.1).
-APP_VERSION = "3.2"
+APP_VERSION = "3.3"
 
 def svg_image(markup, view_box, css_class=""):
     """A drawing for st.html. Its sanitiser drops <svg> outright but lets an
@@ -1736,7 +1736,7 @@ WIND_FLOW_SCRIPT = """
     // south through the year, less so towards the poles. A slow wobble tied
     // to the earth keeps them from looking like stripes and turns the calms
     // into light air from anywhere. Sets `driftX` and `driftY`, in pixels a
-    // step, from x and y in the map's world pixels; never faster than 0.32.
+    // step, from x and y in the map's world pixels; never faster than 0.42.
     const today = new Date();
     const day = (today - new Date(today.getFullYear(), 0, 1)) / 864e5;
     // Furthest north in early August, furthest south in early February.
@@ -1758,7 +1758,7 @@ WIND_FLOW_SCRIPT = """
       const east = -belt + 0.3 * Math.cos(2.5 * wobble);
       const north = -side * 0.45 * belt + 0.3 * Math.sin(2.5 * wobble);
       const angle = Math.atan2(north, east) + 0.2 * wobble;
-      const speed = 0.05 + 0.27 * strength * Math.abs(belt);
+      const speed = 0.065 + 0.35 * strength * Math.abs(belt);
       driftX = Math.cos(angle) * speed;
       driftY = -Math.sin(angle) * speed;
     };
