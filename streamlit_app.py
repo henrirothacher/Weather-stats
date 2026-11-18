@@ -1508,6 +1508,12 @@ MAP_ATTR = "Esri"
 MAP_NATIVE_ZOOM = 16
 MAP_CHROME_CSS = """
 <style>
+/* Esri's dark canvas is a neutral grey; this turns it the app's blue-black,
+   sea about #111822 and land #212c44, so a map and its page read as one.
+   Only the base layer: the place names above it stay as drawn. The ground
+   under tiles still loading is the sea's colour. */
+.leaflet-container { background: #111822; }
+.base-tiles { filter: sepia(.6) hue-rotate(185deg) saturate(4) brightness(.6); }
 .spot-dot {
     width: 13px; height: 13px; border-radius: 50%;
     background: #7dd3fc;
@@ -1642,6 +1648,7 @@ def base_map(**options):
         folium.TileLayer(
             url, attr=MAP_ATTR, overlay=overlay, control=False,
             max_zoom=18, max_native_zoom=MAP_NATIVE_ZOOM,
+            class_name="label-tiles" if overlay else "base-tiles",
         ).add_to(chart)
     chart.get_root().header.add_child(folium.Element(MAP_CHROME_CSS))
     return chart
