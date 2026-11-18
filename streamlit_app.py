@@ -118,30 +118,32 @@ st.html(
     }
     .hero-facts { font-size: .88rem; margin-top: .5rem; color: #8a94a8; }
 
-    /* Landing: the first screen anyone sees. The map is the stage, wind
-       drifting over it, and everything else floats on glass above it: the
-       title and sources top left, your spots on the right, the spot you
-       clicked along the bottom. Below 1100px they stack around the map. */
+    /* Landing: the first screen anyone sees. On a wide screen the map fills
+       the window edge to edge, wind drifting over all of it, and the rest
+       floats on it: the top bar, the title, its four figures and the sources
+       top left with no box around them, your spots on the right, the spot
+       you clicked along the bottom. A shade over the map's top and left
+       keeps the type readable. Below 1100px they stack around the map. */
     .st-key-landing_stage {
-        position: relative; border-radius: 16px; overflow: hidden;
-        border: 1px solid #1f2736; box-shadow: 0 24px 60px rgba(0, 0, 0, .45);
+        position: relative; overflow: hidden;
         animation: stageIn 1s cubic-bezier(.2, .7, .2, 1) both;
     }
     .st-key-landing_stage iframe { display: block; }
-    @media (min-width: 1100px) { .st-key-landing_stage { gap: 0 !important; } }
-    /* Under 1100px the panels stack around the map, so the stage is just
-       the map's frame and the panels sit outside its rounded edge. */
-    @media (max-width: 1099px) {
-        .st-key-landing_stage { overflow: visible; border: 0; box-shadow: none; }
-    }
-    .st-key-landing_hero, .st-key-landing_spots, .st-key-picked_panel {
+    .st-key-landing_spots, .st-key-picked_panel {
         background: rgba(10, 13, 20, .78); border: 1px solid rgba(231, 235, 243, .09);
         border-radius: 14px; box-shadow: 0 12px 36px rgba(0, 0, 0, .45);
         -webkit-backdrop-filter: blur(12px) saturate(1.2); backdrop-filter: blur(12px) saturate(1.2);
     }
-    .st-key-landing_hero { padding: 1.5rem 1.6rem 1.3rem; gap: .9rem; }
+    .st-key-landing_hero { gap: 1.1rem; }
     .st-key-landing_spots { padding: 1rem 1rem .8rem; }
     .st-key-landing_spots .section-label { flex-direction: column; gap: .1rem; }
+    /* Under 1100px the panels stack around the map, so the stage is just
+       the map's frame and the panels sit outside its rounded edge. */
+    @media (max-width: 1099px) {
+        .st-key-landing_stage { overflow: visible; }
+        .st-key-landing_stage iframe[title="streamlit_folium.st_folium"] { border-radius: 14px; }
+        .st-key-landing_hero { padding: .6rem 0 .4rem; }
+    }
     /* On a phone the four sources wrap onto two lines rather than scroll. */
     @media (max-width: 640px) {
         .st-key-source_pick [data-testid="stButtonGroup"] > div { flex-wrap: wrap; }
@@ -151,29 +153,83 @@ st.html(
     .st-key-picked_panel { padding: 1rem 1.1rem; border-color: #2dd4bf !important; }
     .st-key-picked_panel [data-testid="stMetricValue"] { font-size: 1.35rem; }
     @media (min-width: 1100px) {
+        /* The map reaches the window's edges and its top, under Streamlit's
+           own header, and the top bar floats on it where it always sits. */
+        body:has(.st-key-landing_stage) [data-testid="stHeader"] { background: transparent; }
+        body:has(.st-key-landing_stage) [data-testid="stMainBlockContainer"] {
+            padding-top: 0; position: relative;
+        }
+        /* The bar's wrapper floats, so it leaves no gap above the map. */
+        body:has(.st-key-landing_stage) [data-testid="stLayoutWrapper"]:has(> .st-key-topbar) {
+            position: absolute; z-index: 7; top: 3.8rem; left: 3rem; right: 3rem;
+            width: auto !important;
+        }
+        body:has(.st-key-landing_stage) .st-key-topbar { border-bottom: 0; }
+        .st-key-landing_stage {
+            gap: 0 !important; height: 100dvh; margin: 0 -3rem;
+            flex: none !important; width: calc(100% + 6rem) !important; max-width: none !important;
+        }
+        .st-key-landing_stage iframe[title="streamlit_folium.st_folium"] {
+            height: 100dvh !important; border-radius: 0;
+        }
+        .st-key-landing_stage::before {
+            content: ""; position: absolute; inset: 0; z-index: 4; pointer-events: none;
+            background:
+                linear-gradient(180deg, rgba(10, 13, 20, .92), rgba(10, 13, 20, 0) 190px),
+                linear-gradient(90deg, rgba(10, 13, 20, .9) 0, rgba(10, 13, 20, .72) 34%,
+                                rgba(10, 13, 20, 0) 62%);
+        }
         .st-key-landing_hero {
-            position: absolute; z-index: 5; top: 20px; left: 20px; width: min(540px, 44%);
+            position: absolute; z-index: 5; top: 8.6rem; left: 3rem; width: min(640px, 48%);
             animation: riseIn .8s cubic-bezier(.2, .7, .2, 1) .25s both;
         }
         .st-key-landing_spots {
-            position: absolute; z-index: 5; top: 20px; right: 20px; width: 420px;
+            position: absolute; z-index: 5; top: 8.6rem; right: 3rem; width: 420px;
             animation: riseIn .8s cubic-bezier(.2, .7, .2, 1) .4s both;
         }
         .st-key-landing_pick {
-            position: absolute; z-index: 6; left: 20px; bottom: 20px; right: 72px;
+            position: absolute; z-index: 6; left: 3rem; bottom: 2rem; right: 72px;
             width: auto !important; pointer-events: none;
         }
-        .st-key-landing_stage:has(.st-key-landing_spots) .st-key-landing_pick { right: 460px; }
+        .st-key-landing_stage:has(.st-key-landing_spots) .st-key-landing_pick { right: 500px; }
         .st-key-picked_panel {
             pointer-events: auto; animation: riseIn .5s cubic-bezier(.2, .7, .2, 1) both;
         }
     }
     .landing-title {
-        font-size: clamp(2rem, 3vw, 2.9rem); font-weight: 800; line-height: 1.04;
-        letter-spacing: -.035em; color: #e7ebf3;
+        font-size: clamp(2.4rem, 4.2vw, 4.4rem); font-weight: 800; line-height: 1;
+        letter-spacing: -.04em; color: #e7ebf3;
     }
     .landing-title span { color: #5eead4; }
-    .landing-sub { font-size: .98rem; line-height: 1.55; color: #a7b1c4; margin-top: .7rem; }
+    .landing-sub {
+        font-size: 1.05rem; line-height: 1.55; color: #a7b1c4; margin-top: .9rem;
+        max-width: 54ch;
+    }
+    /* Four figures on what a click brings, which change with the source. */
+    .landing-facts {
+        display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .6rem;
+    }
+    @media (max-width: 640px) {
+        .landing-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    .landing-facts div {
+        border: 1px solid #273043; border-left: 3px solid #2dd4bf; border-radius: 4px;
+        background: rgba(18, 22, 31, .72); padding: .7rem .85rem;
+    }
+    .landing-facts div:nth-child(2n) { border-left-color: #7dd3fc; }
+    .landing-facts b {
+        display: block; font-size: 1.45rem; font-weight: 800; letter-spacing: -.02em;
+        color: #e7ebf3; white-space: nowrap;
+    }
+    .landing-facts span {
+        display: block; font-size: .68rem; letter-spacing: .1em; text-transform: uppercase;
+        line-height: 1.35; color: #8a94a8; margin-top: .15rem;
+    }
+    /* A window too short for all of it keeps the title smaller. */
+    @media (min-width: 1100px) and (max-height: 820px) {
+        .landing-title { font-size: clamp(2.2rem, 3.4vw, 3.4rem); }
+        .landing-sub { font-size: .98rem; margin-top: .6rem; }
+    }
     .landing-hint {
         display: inline-flex; align-items: center; gap: .55rem;
         font-size: .84rem; font-weight: 600; color: #e7ebf3;
@@ -1611,7 +1667,7 @@ WIND_FLOW_SCRIPT = """
 (() => {
   if (window.__windFlow) return;
   window.__windFlow = true;
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   let attached = null;
   const attach = () => {
@@ -1621,9 +1677,21 @@ WIND_FLOW_SCRIPT = """
     const map = view && view.map;
     if (!map || !view.L || map === attached || !map.getContainer().isConnected) return;
     attached = map;
-    flow(view, map);
+    // On a wide screen the title floats over the map's left part and your
+    // spots over its right: shift a new map's view so what it opened on, the
+    // spot you clicked included, sits in the clear part between them.
+    const hero = document.querySelector(".st-key-landing_hero");
+    if (hero && getComputedStyle(hero).position === "absolute") {
+      const spots = document.querySelector(".st-key-landing_spots");
+      const width = map.getSize().x;
+      const left = hero.getBoundingClientRect().right;
+      const right = spots ? spots.getBoundingClientRect().left : width;
+      map.panBy([width / 2 - (left + right) / 2, 0], { animate: false });
+    }
+    if (!still) flow(view, map);
   };
-  setInterval(attach, 800);
+  // Often enough that a new map is shifted before it is noticed.
+  setInterval(attach, 250);
   attach();
 
   function flow(view, map) {
@@ -1717,12 +1785,29 @@ WIND_FLOW_SCRIPT = """
 """
 
 
-# Tall enough to fill a laptop screen under the top bar.
+# The landing map's height on a phone or narrow window. On a wide one the
+# page styles stretch its frame to the window, and FILL_FRAME_CSS, inside the
+# frame, has the map follow: streamlit_folium otherwise fixes it in pixels.
 LANDING_MAP_HEIGHT = 700
 # Your spots float over the map's right side, a row each, scrolling past
 # this height so the zoom buttons below stay clear.
 SPOT_ROW_HEIGHT = 104
 SPOT_LIST_MAX = 430
+FILL_FRAME_CSS = """
+<style>
+#map_div, #map_div2 { height: 100vh !important; }
+html, body { overflow: hidden; }
+</style>
+"""
+
+
+def landing_map(**options):
+    """The landing's map: the house map, filling whatever frame it is given."""
+    world = base_map(control_scale=True, min_zoom=2, world_copy_jump=True,
+                     zoom_control="bottomright", **options)
+    world.get_root().header.add_child(folium.Element(FILL_FRAME_CSS))
+    return world
+
 
 # Hovering a saved spot drops a labelled, pulsing marker on the landing map
 # and flies there when the spot is off-screen. Hover never reaches Python, so
@@ -1973,16 +2058,32 @@ if st.session_state["spot"] is None:
         # A summit station looks down on the water rather than standing by it.
         stations = stations[by_a_shore(stations, SHORE_KM) & ~stations["summit"]]
 
-    # One line on what a click fetches from the chosen source.
-    pitch = {
-        "metar": "Click near an airport to download every wind report it has sent, "
-                 "measured beside the runway.",
-        "meteoswiss": "Click a MeteoSwiss station to download every hour it has measured.",
-        "arome": f"Click any water in western Europe to download every hour since "
-                 f"{AROME_SINCE:%B %Y} from Météo-France's 1.5 km AROME model.",
-        "era5": "Click any water to download twenty years of hourly ERA5 wind for that "
-                "spot, 25 km cells, back to 1940 on request.",
-    }[source]
+    # One line on what a click fetches from the chosen source, and four
+    # figures on it, the last always your list.
+    if source == "metar":
+        pitch = ("Click near an airport to download every wind report it has sent, "
+                 "measured beside the runway.")
+        facts = [("Hourly", "most since the 1970s"), ("Measured", "not modelled"),
+                 (f"{len(stations):,}" if stations is not None else "1,400+",
+                  "airports by the water" if by_water else "airports")]
+    elif source == "meteoswiss":
+        pitch = "Click a MeteoSwiss station to download every hour it has measured."
+        facts = [(f"{stations['since'].min():.0f}" if stations is not None else "1981",
+                  "first year on record"),
+                 ("Measured", "not modelled"),
+                 (f"{len(stations):,}" if stations is not None else "25+",
+                  "stations by the water" if by_water else "stations with wind")]
+    elif source == "arome":
+        pitch = ("Click any water in western Europe to download every hour from "
+                 "Météo-France's AROME model: lakes, bays and straits get their own wind.")
+        facts = [("1.5 km", "per grid cell"), (f"{AROME_SINCE:%b %Y}", "first month on record"),
+                 ("Hourly", "every day since")]
+    else:
+        pitch = ("Click any water to download twenty years of hourly ERA5 wind for that "
+                 "spot, and every year since if you ask.")
+        facts = [("1940", "first year on record"), ("Hourly", "every day since"),
+                 ("25 km", "per grid cell")]
+    facts.append((len(saved), "spot in your list" if len(saved) == 1 else "spots in your list"))
 
     # The map is the stage; the rest floats on it (see "Landing" in the styles).
     # Each part gets its slot now, in the order a phone stacks them, and is
@@ -1994,9 +2095,14 @@ if st.session_state["spot"] is None:
         pick_slot = st.container(key="landing_pick")
 
     hero.html(
-        '<div class="landing-title">Hourly wind history for <span>any spot</span></div>'
+        '<div class="landing-title">Hourly wind history<br>for <span>any spot</span></div>'
         f'<div class="landing-sub">{pitch} Then see how often it is sailable for you, '
         "or compare it with other spots on the dates you are going.</div>"
+    )
+    hero.html(
+        '<div class="landing-facts">'
+        + "".join(f"<div><b>{value}</b><span>{label}</span></div>" for value, label in facts)
+        + "</div>"
     )
     found = None
     with hero.container(horizontal=True, vertical_alignment="bottom", gap="medium"):
@@ -2041,14 +2147,7 @@ if st.session_state["spot"] is None:
         if source in CELL_GRIDS:
             grid = CELL_GRIDS[source]
             home, far = CELL_VIEWS[source]
-            world = base_map(
-                location=list(centre or home),
-                zoom_start=7 if centre else far,
-                control_scale=True,
-                min_zoom=2,
-                world_copy_jump=True,
-                zoom_control="bottomright",
-            )
+            world = landing_map(location=list(centre or home), zoom_start=7 if centre else far)
             if source == "arome":
                 # The model stops at the outline; a click past it finds nothing.
                 south, north, west, east = AROME_AREA
@@ -2087,11 +2186,8 @@ if st.session_state["spot"] is None:
             )
         else:
             focus = tuple(stations.loc[picked, ["lat", "lon"]]) if picked else centre or SWISS_CENTRE
-            world = base_map(
-                location=list(focus), zoom_start=10 if picked or centre else STATION_ZOOM[source],
-                control_scale=True, min_zoom=2, world_copy_jump=True,
-                zoom_control="bottomright",
-            )
+            world = landing_map(
+                location=list(focus), zoom_start=10 if picked or centre else STATION_ZOOM[source])
             hint = (
                 "Click another station to switch" if picked
                 else "Click a station, or anywhere for the nearest one"
