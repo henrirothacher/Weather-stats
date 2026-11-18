@@ -2793,8 +2793,8 @@ if "mode" not in st.session_state:
 
 CHOICES = [
     ("rating", "Rate this spot", "One score out of ten for what you sail.", "Rate it"),
-    ("explore", "Explore this spot", "Windy days by month, the wind rose and more.",
-     "Explore"),
+    ("explore", "All the stats for this spot",
+     "Windy days by month, the wind rose, every year and the numbers.", "Explore"),
     ("window", "Plan a trip", "What to expect on your dates, compared with other spots.",
      "Plan a trip"),
 ]
