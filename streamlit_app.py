@@ -1798,7 +1798,7 @@ WIND_FLOW_SCRIPT = """
 # frame, has the map follow: streamlit_folium otherwise fixes it in pixels.
 # The trip's map stage is sized the same way (see "trip_stage" in its styles).
 LANDING_MAP_HEIGHT = 700
-TRIP_MAP_HEIGHT = 620
+TRIP_MAP_HEIGHT = 420
 FILL_FRAME_CSS = """
 <style>
 #map_div, #map_div2 { height: 100vh !important; }
@@ -3293,15 +3293,16 @@ def ask_kind(place):
         format_func=lambda same: ("Stations only" if STATION else "Model cells only") if same
         else "All spots",
         key="like_with_like", default=DEFAULT_LIKE_WITH_LIKE, start="default",
-        help="Stations (MeteoSwiss and airports) beside stations, model cells (ERA5 and "
-        "AROME) beside model cells, or every spot you have downloaded. A station measures "
-        "the wind where it stands; a model averages a cell, 25 km for ERA5 and 1.5 km for "
-        "AROME, which smooths it out.",
+        help="Which of your spots to offer: stations (MeteoSwiss and airports) beside "
+        "stations, model cells (ERA5 and AROME) beside model cells, or all of them. A spot "
+        "you add yourself, such as the airport next to an AROME cell, stays either way. A "
+        "station measures the wind where it stands; a model averages a cell, 25 km for ERA5 "
+        "and 1.5 km for AROME, which smooths it out.",
     )
 
 
 def comparable(spots):
-    """The spots to set beside this one: all of them, or only those of its
+    """The spots to offer beside this one: all of them, or only those of its
     own kind, measured or modelled, as the Compare setting says."""
     if not kept("like_with_like", DEFAULT_LIKE_WITH_LIKE):
         return spots
@@ -3370,11 +3371,11 @@ ANSWER_CSS = """
     }
 }
 .st-key-trip_map { position: relative; }
-.st-key-trip_map iframe { display: block; height: 360px !important; border-radius: 0; }
-.st-key-trip_hero { gap: 1rem; padding: .6rem 0 1.4rem; }
-.st-key-trip_hero .stage-title { font-size: clamp(2.1rem, 5.2cqi, 3.6rem); }
+.st-key-trip_map iframe { display: block; height: 320px !important; border-radius: 0; }
+.st-key-trip_hero { gap: .9rem; padding: .6rem 0 1.2rem; }
+.st-key-trip_hero .stage-title { font-size: clamp(1.8rem, 3.7cqi, 2.7rem); }
 .stage-verdict {
-    margin-top: 1rem; font-size: 1.15rem; font-weight: 600; line-height: 1.45; color: #e7ebf3;
+    margin-top: .7rem; font-size: 1.05rem; font-weight: 600; line-height: 1.45; color: #e7ebf3;
 }
 .stage-verdict b { color: #2dd4bf; }
 .facts-for { margin-bottom: .55rem; font-size: .82rem; color: #8a94a8; }
@@ -3382,17 +3383,18 @@ ANSWER_CSS = """
 .stage-rule { font-size: .86rem; line-height: 1.5; color: #8a94a8; }
 .stage-rule b { color: #a7b1c4; }
 @container (min-width: 860px) {
-    .st-key-trip_map iframe { height: 620px !important; }
+    .st-key-trip_map iframe { height: 420px !important; }
     .st-key-trip_map::after {
         content: ""; position: absolute; inset: 0; z-index: 4; pointer-events: none;
         background: linear-gradient(90deg, rgba(10, 13, 20, .93) 0,
                                     rgba(10, 13, 20, .76) 42%, rgba(10, 13, 20, 0) 70%);
     }
     .st-key-trip_hero {
-        position: absolute; z-index: 5; top: 2.4rem; left: 3rem; width: min(600px, 54%);
+        position: absolute; z-index: 5; top: 1.6rem; left: 3rem; width: min(600px, 54%);
         padding: 0; animation: riseIn .8s cubic-bezier(.2, .7, .2, 1) .2s both;
     }
 }
+.trip-rule { margin-bottom: .3rem; }
 @media (prefers-reduced-motion: reduce) {
     .st-key-trip_stage, .st-key-trip_hero { animation: none; }
 }
@@ -3448,17 +3450,34 @@ ANSWER_CSS = """
     [class*="st-key-trip_row_"] { flex-wrap: wrap !important; }
     [class*="st-key-trip_row_"] > div:first-child { flex: 1 0 100% !important; }
 }
+/* Comparing another spot, right under the map it shares. */
 .st-key-trip_add_panel {
-    margin-top: .4rem; padding: 1.1rem 1.2rem !important;
-    border: 1px dashed #2dd4bf; border-radius: 10px; background: #0c1017;
+    margin: .2rem 0 .6rem; padding: 1.2rem 1.3rem !important;
+    border: 1px solid #2dd4bf; border-radius: 10px; background: #0c1017;
 }
-.add-title { font-size: 1.15rem; font-weight: 700; color: #e7ebf3; }
+.add-title { font-size: 1.3rem; font-weight: 700; color: #e7ebf3; }
+.add-sub { margin-top: .2rem; font-size: .92rem; font-weight: 700; color: #a7b1c4; }
+/* The same place in other data: a row a source, its button at the end. */
+[class*="st-key-nearrow_"] {
+    padding: .55rem .7rem .55rem .9rem !important; border: 1px solid #273043;
+    border-radius: 8px; background: #10141c; flex-wrap: nowrap !important;
+}
+[class*="st-key-nearrow_"] > div:first-child { flex: 1 1 auto !important; min-width: 0 !important; }
+[class*="st-key-nearrow_"] > div:not(:first-child) { flex: 0 0 auto !important; }
+[class*="st-key-nearrow_"] p { margin-bottom: 0; line-height: 1.45; }
+[class*="st-key-nearrow_"] [data-testid="stMarkdownContainer"] { margin-bottom: 0; }
+/* On a phone the text takes the row, its button a line below. */
+@media (max-width: 640px) {
+    [class*="st-key-nearrow_"] { flex-wrap: wrap !important; }
+    [class*="st-key-nearrow_"] > div:first-child { flex: 1 0 100% !important; }
+}
 /* The spot in focus in full: its heading above the chapters under it. */
 .detail-title {
     margin-top: 2.4rem; padding-top: 1.6rem; border-top: 1px solid #273043;
     font-size: clamp(1.8rem, 3vw, 2.3rem); font-weight: 800; line-height: 1.1;
     letter-spacing: -.03em; color: #e7ebf3;
 }
+.detail-source { margin-top: .45rem; font-size: .86rem; color: #8a94a8; }
 
 </style>
 """
@@ -3796,9 +3815,6 @@ DATES_HINT = ("Every year on record is checked on these days. Wind and hours on 
               "are set in the filter.")
 # How many of your other spots a trip ranks beside yours.
 COMPARE_UP_TO = 5
-COMPARE_MAP_HEIGHT = 340
-# A click on the comparison map counts for the spot within this far of it.
-COMPARE_CLICK_KM = 50
 # Your hours on the water as too light, right and too strong.
 BANDS = {
     "light": ("Too light", "#334155"),
@@ -3898,68 +3914,59 @@ def nearest_spots(spots, where, others):
     return [others[index] for index in np.argsort(km)[:COMPARE_UP_TO]]
 
 
-def compare_map(spots, where, chosen, others, names, new):
-    """Your spots on one map, to set beside this one with a click: yours
-    teal and ringed, the chosen ones amber, the rest grey, and `new`, a spot
-    not downloaded yet, in its cell. The dots are a layer of their own, so a
-    pick swaps them without redrawing the map under them. Returns the key
-    of the spot just clicked, the (lat, lon) of a click on open ground, or
-    None."""
-    lats = np.array([spots[key]["lat"] for key in (where, *others)])
-    lons = np.array([spots[key]["lon"] for key in (where, *others)])
-    chart = base_map(min_zoom=2, world_copy_jump=True)
-    chart.fit_bounds([[lats.min(), lons.min()], [lats.max(), lons.max()]],
-                     padding=(50, 50), max_zoom=8)
-    dots = folium.FeatureGroup(name="spots")
-    dot_marker(lats[0], lons[0], f"{names[where]} · your pick", picked=True).add_to(dots)
-    for key in others:
-        dot_marker(spots[key]["lat"], spots[key]["lon"],
-                   names[key] + (" · beside yours" if key in chosen else ""),
-                   idle=key not in chosen, chosen=key in chosen).add_to(dots)
-    if new:
-        cell = CELL_GRIDS.get(new["source"]) if not new.get("station") else None
-        if cell:
-            folium.Rectangle(
-                bounds=[[new["lat"] - cell / 2, new["lon"] - cell / 2],
-                        [new["lat"] + cell / 2, new["lon"] + cell / 2]],
-                color="#7dd3fc", weight=2, fill=True, fill_opacity=0.25,
-            ).add_to(dots)
-        dot_marker(new["lat"], new["lon"], f"{spot_title(new)} · not downloaded yet").add_to(dots)
-    result = st_folium(chart, height=COMPARE_MAP_HEIGHT, use_container_width=True,
-                       key="compare_map", feature_group_to_add=dots,
-                       returned_objects=["last_clicked", "last_object_clicked",
-                                         "last_object_clicked_count"])
-    clicked = fresh_click(result, "compare_click_seen")
-    if clicked is None:
-        return None
-    # Nearest of all the dots, yours first: a click on yours does nothing.
-    km = km_from(*clicked, lats, lons)
-    nearest = int(np.argmin(km))
-    if km[nearest] > COMPARE_CLICK_KM:
-        return clicked
-    return others[nearest - 1] if nearest else None
-
-
-def spot_at(latitude, longitude):
-    """A spot of this trip's own source at a click, like beside like: the
-    cell there for a model, the nearest station for a station source. None
-    where the source has nothing there."""
-    if STATION:
-        table = meteoswiss_stations() if SOURCE == "meteoswiss" else metar_stations()
+def spot_at(latitude, longitude, source=None):
+    """A spot of `source`, this trip's own unless said, at a point: the cell
+    there for a model, the nearest station for a station source. None where
+    the source has nothing there."""
+    source = source or SOURCE
+    if source in STATION_FILES:
+        table = meteoswiss_stations() if source == "meteoswiss" else metar_stations()
         abbr = km_from(latitude, longitude, table["lat"], table["lon"]).idxmin()
         row = table.loc[abbr]
-        found = {"lat": float(row["lat"]), "lon": float(row["lon"]), "source": SOURCE,
+        found = {"lat": float(row["lat"]), "lon": float(row["lon"]), "source": source,
                  "station": abbr, "height": float(row["height"]), "name": str(row["name"])}
-    elif SOURCE == "arome" and not in_arome_area(latitude, longitude):
+    elif source == "arome" and not in_arome_area(latitude, longitude):
         return None
     else:
-        grid = CELL_GRIDS[SOURCE]
+        grid = CELL_GRIDS[source]
         found = {"lat": snap_to_grid(latitude, grid), "lon": snap_to_grid(longitude, grid),
-                 "source": SOURCE}
+                 "source": source}
         found["name"] = place_name(found["lat"], found["lon"])
     known = load_registry().get(spot_key(found), {})
     return {**found, "zone": timezone_at(found["lat"], found["lon"]),
             "name": known.get("name") or found["name"]}
+
+
+# How far a station may be and still count as the same place as a spot.
+NEAR_STATION_KM = 40
+# South, north, west, east: where MeteoSwiss stations are worth looking for.
+SWISS_AREA = (45.5, 48.0, 5.5, 10.8)
+
+
+def same_place(spot):
+    """This spot in the other sources, as (spot, km away): the AROME and
+    ERA5 cells over it, and the nearest METAR and MeteoSwiss stations within
+    NEAR_STATION_KM. Its own source, and a source with nothing near or that
+    cannot be reached just now, are left out."""
+    latitude, longitude = spot["lat"], spot["lon"]
+    south, north, west, east = SWISS_AREA
+    found = []
+    for source in SOURCES:
+        if source == spot.get("source", "era5"):
+            continue
+        if source == "meteoswiss" and not (south <= latitude <= north and west <= longitude <= east):
+            continue
+        try:
+            other = spot_at(latitude, longitude, source)
+        except Exception:  # a station list that will not load leaves its source out
+            continue
+        if other is None:
+            continue
+        km = float(km_from(latitude, longitude, np.array([other["lat"]]), np.array([other["lon"]]))[0])
+        if source in STATION_FILES and km > NEAR_STATION_KM:
+            continue
+        found.append((other, km))
+    return found
 
 
 def fetch_here(entry, show):
@@ -3986,6 +3993,52 @@ NEW_SPOT_NOTES = {
              "needed, a year at a time.",
     "era5": "The last twenty years, prepared on Copernicus' side: this can take a while.",
 }
+# The same, as short as a row beside its button can take.
+DOWNLOAD_TIME = {"metar": "about a minute", "meteoswiss": "a minute or two",
+                 "arome": "a year at a time", "era5": "can take a while"}
+CELL_SIZES = {"era5": "25 km", "arome": "1.5 km"}
+
+
+def source_tag(spot):
+    """A spot's source in a few words for a ranking row, measured or
+    modelled, its full credit on hover."""
+    source = spot.get("source", "era5")
+    short = (f"{STATION_NAMES[source]} {spot['station']} · measured" if spot.get("station")
+             else f"{MODEL_NAMES[source]} · modelled, {CELL_SIZES[source]} cell")
+    return f'<span title="{html.escape(source_credit(spot))}">{short}</span>'
+
+
+def compare_near(candidate):
+    """Another source's spot here joins the comparison: straight away when
+    its record is on disk, through the download card when it is not."""
+    if not spot_path(candidate).exists():
+        st.session_state["compare_new"] = candidate
+        return
+    if spot_key(candidate) not in load_registry():
+        remember_location(candidate)
+    follow(candidate)
+    add_compare(spot_key(candidate))
+
+
+def near_row(candidate, km, chosen):
+    """One of `same_place`: its source, which station or cell, measured or
+    modelled, whether it is on disk, and a button that compares it."""
+    key, source = spot_key(candidate), candidate["source"]
+    if candidate.get("station"):
+        what = f"{candidate['name']} ({candidate['station']}), {km:.0f} km away"
+        height = candidate.get("height")
+        how = "measured at the station" + (
+            f", {height:.0f} m above the sea" if pd.notna(height) else "")
+    else:
+        what = f"the {CELL_SIZES[source]} cell over this spot"
+        how = "modelled" + (f", since {AROME_SINCE:%B %Y}" if source == "arome" else "")
+    state = "on disk" if spot_path(candidate).exists() else f"not downloaded yet, {DOWNLOAD_TIME[source]}"
+    with st.container(horizontal=True, vertical_alignment="center", key=f"nearrow_{key}"):
+        st.markdown(f"**{SOURCES[source].split(' · ')[0]}** · {what}  \n:gray[{how} · {state}]",
+                    width="stretch")
+        st.button("Compared" if key in chosen else "Compare", key=f"near_add_{key}",
+                  icon=None if key in chosen else ":material/add:", disabled=key in chosen,
+                  on_click=compare_near, args=(candidate,), width="content")
 
 
 def trip_row(name, credit, outlook, length, rank, tags):
@@ -4043,34 +4096,57 @@ TRIP_PIN_CSS = """
 </style>
 """
 
-# Fits the trip's map to your spots in the part of it the answer leaves
+# Fits the trip's map to the spots compared in the part of it the answer leaves
 # clear: right of the title on a wide page, all of it on a narrow one. Runs
-# in the page, like the landing's wind, and fits each new map once, so a pan
-# or zoom of yours stays. Same rule: no "<" before a letter, "/" or "!".
+# in the page, like the landing's wind. A map can come up before its frame
+# has a size, or be set back as it settles, so the fit is checked again and
+# again until the spots sit in the clear part; once you press, scroll or
+# touch the map, it is yours and stays where you put it. Same rule: no "<"
+# before a letter, "/" or "!".
 TRIP_FIT_SCRIPT = """
 <script>
 (() => {
   if (window.__tripFit) return;
   window.__tripFit = true;
-  let fitted = null;
   const fit = () => {
     const frame = document.querySelector(
       '.st-key-trip_map iframe[title="streamlit_folium.st_folium"]');
     const view = frame && frame.contentWindow;
     const map = view && view.map;
-    if (!map || !view.L || map === fitted || !map.getContainer().isConnected) return;
+    if (!map || !view.L || !map.getContainer().isConnected) return;
+    const size = map.getSize();
+    if (50 > size.x || 50 > size.y) return;
+    if (!map.__fitWatch) {
+      map.__fitWatch = true;
+      map.__fits = 0;
+      for (const kind of ["mousedown", "wheel", "touchstart"]) {
+        map.getContainer().addEventListener(kind, () => { map.__yours = true; }, { passive: true });
+      }
+    }
+    if (map.__yours || map.__fits >= 6) return;
+    // The spots compared only: your other spots may be anywhere on earth.
     const points = [];
-    map.eachLayer((layer) => { if (layer.getLatLng) points.push(layer.getLatLng()); });
+    map.eachLayer((layer) => {
+      const icon = layer.options && layer.options.icon;
+      if (layer.getLatLng && icon && String(icon.options.html || "").includes("trip-pin")) {
+        points.push(layer.getLatLng());
+      }
+    });
     if (points.length === 0) return;
-    fitted = map;
     const hero = document.querySelector(".st-key-trip_hero");
     const floating = hero && getComputedStyle(hero).position === "absolute";
     const left = floating
       ? hero.getBoundingClientRect().right - frame.getBoundingClientRect().left + 50 : 50;
     // Names run to the right of their bubbles, hence the room on that side.
+    const right = floating ? 230 : 160;
+    const clear = points.every((point) => {
+      const at = map.latLngToContainerPoint(point);
+      return at.x >= left - 40 && size.x - right + 40 >= at.x && at.y >= 30 && size.y - 20 >= at.y;
+    });
+    if (clear && map.__fits) return;
+    map.__fits += 1;
     map.fitBounds(view.L.latLngBounds(points), {
-      paddingTopLeft: [left, 70], paddingBottomRight: [floating ? 230 : 160, 50],
-      maxZoom: 8, animate: false,
+      paddingTopLeft: [left, 70], paddingBottomRight: [right, 50], maxZoom: 8, animate: false,
     });
   };
   setInterval(fit, 250);
@@ -4080,10 +4156,13 @@ TRIP_FIT_SCRIPT = """
 """
 
 
-def trip_stage_map(spots, order, best, where, focus, names, totals):
-    """The trip's map stage: your spots in `order`, each with its days in a
-    typical year (see TRIP_PIN_CSS). Returns the key of a spot just clicked,
-    or None."""
+def trip_stage_map(spots, order, best, where, focus, names, totals, spare, new):
+    """The trip's map stage, and its one map: your spots in `order`, each
+    with its days in a typical year (see TRIP_PIN_CSS); your `spare` spots
+    as grey dots to add with a click; `new`, a spot not downloaded yet, in
+    its cell. Returns what a fresh click asks for: ("focus", key) on a spot
+    compared, ("add", key) on a grey dot, ("new", (lat, lon)) on open
+    ground, or None."""
     lats = [spots[key]["lat"] for key in order]
     lons = [spots[key]["lon"] for key in order]
     # No scale: it would sit under the answer, and distance is not the point.
@@ -4092,6 +4171,18 @@ def trip_stage_map(spots, order, best, where, focus, names, totals):
     world.get_root().header.add_child(folium.Element(TRIP_PIN_CSS))
     # Fitted again in the page with room for the answer (TRIP_FIT_SCRIPT).
     world.fit_bounds([[min(lats), min(lons)], [max(lats), max(lons)]], max_zoom=8)
+    for key in spare:
+        dot_marker(spots[key]["lat"], spots[key]["lon"], f"{names[key]} · click to compare",
+                   idle=True).add_to(world)
+    if new:
+        cell = None if new.get("station") else CELL_GRIDS[new["source"]]
+        if cell:
+            folium.Rectangle(
+                bounds=[[new["lat"] - cell / 2, new["lon"] - cell / 2],
+                        [new["lat"] + cell / 2, new["lon"] + cell / 2]],
+                color="#7dd3fc", weight=2, fill=True, fill_opacity=0.25,
+            ).add_to(world)
+        dot_marker(new["lat"], new["lon"], f"{spot_title(new)} · not downloaded yet").add_to(world)
     for key in order:
         kinds = " ".join(["trip-pin"] + [kind for kind, on in (
             ("best", key in best), ("here", key == where), ("focus", key == focus)) if on])
@@ -4105,18 +4196,30 @@ def trip_stage_map(spots, order, best, where, focus, names, totals):
         ).add_to(world)
     result = st_folium(
         world, height=TRIP_MAP_HEIGHT, use_container_width=True, key="trip_stage_map",
-        returned_objects=["last_object_clicked", "last_object_clicked_count"],
+        returned_objects=["last_clicked", "last_object_clicked", "last_object_clicked_count"],
     ) or {}
-    # st_folium replays the last click on every rerun: only a new one counts.
-    count = result.get("last_object_clicked_count") or 0
-    if count == st.session_state.get("trip_pin_seen", 0):
+    # st_folium replays the last clicks on every rerun, so only a new one
+    # counts. A pin or dot reports as an object click, counted; open ground
+    # as a map click (as in fresh_click).
+    ground, dot = result.get("last_clicked"), result.get("last_object_clicked")
+    clicks = ((ground["lat"], ground["lng"]) if ground else None,
+              result.get("last_object_clicked_count") or 0)
+    seen = st.session_state.get("trip_clicks_seen", (None, 0))
+    if clicks == seen:
         return None
-    st.session_state["trip_pin_seen"] = count
-    dot = result.get("last_object_clicked")
+    st.session_state["trip_clicks_seen"] = clicks
+    if clicks[1] == seen[1]:
+        return ("new", clicks[0]) if clicks[0] else None
     if not dot:
         return None
-    return min(order, key=lambda key: (spots[key]["lat"] - dot["lat"]) ** 2
-               + (spots[key]["lon"] - dot["lng"]) ** 2)
+    keys = [*order, *spare]
+    km = km_from(dot["lat"], dot["lng"], np.array([spots[key]["lat"] for key in keys]),
+                 np.array([spots[key]["lon"] for key in keys]))
+    nearest = int(np.argmin(km))
+    # Nothing within a km: the dot of the spot not downloaded yet.
+    if km[nearest] > 1:
+        return None
+    return ("focus" if keys[nearest] in order else "add", keys[nearest])
 
 
 if st.session_state["mode"] == "window":
@@ -4150,11 +4253,14 @@ if st.session_state["mode"] == "window":
         return trip_outlook(path, path.stat().st_mtime, spots[key]["zone"], years_back,
                             wind, lasting, hours, dates, shift, feels)
 
-    # Yours and up to COMPARE_UP_TO others: your nearest at first, then your picks.
+    # Yours and up to COMPARE_UP_TO others: your nearest at first, then your
+    # picks. The Compare setting decides which of your spots are offered; one
+    # you add yourself stays, whatever its kind, so AROME can sit beside METAR.
     others = [key for key in comparable(spots) if key != where]
     if "trip_compare" not in st.session_state:
         st.session_state["trip_compare"] = nearest_spots(spots, where, others)
-    chosen = [key for key in st.session_state["trip_compare"] if key in others][:COMPARE_UP_TO]
+    chosen = [key for key in st.session_state["trip_compare"]
+              if key in spots and key != where][:COMPARE_UP_TO]
     st.session_state["trip_compare"] = chosen
     with st.spinner("Reading every year on record..."):
         outlooks = {key: outlook_at(key) for key in [where, *chosen]}
@@ -4197,7 +4303,7 @@ if st.session_state["mode"] == "window":
         hero = st.container(key="trip_hero")
         map_slot = st.container(key="trip_map")
     hero.html(
-        f'<div class="stage-title">Your wind on<br><span>{dates_label(dates)}</span></div>'
+        f'<div class="stage-title">Your wind on <span>{dates_label(dates)}</span></div>'
         f'<div class="stage-verdict">{verdict}</div>'
     )
     # Four figures for the spot in focus, yours until you pick another.
@@ -4221,86 +4327,78 @@ if st.session_state["mode"] == "window":
         + "".join(f"<div><b>{value}</b><span>{label}</span></div>" for value, label in figures)
         + "</div>"
     )
-    with hero.container(horizontal=True, vertical_alignment="center", gap="medium"):
-        st.html(
-            f'<div class="stage-rule">Days with <b>{wind_words(wind)}</b> for {lasting} h in a '
-            f"row {within}, in a typical year of {span}, each spot in its own local time.</div>",
-            width="stretch",
-        )
+    with hero.container(horizontal=True, vertical_alignment="center", gap="small"):
+        st.button("Compare another spot", type="primary", icon=":material/add:", key="trip_add",
+                  on_click=st.session_state.__setitem__, args=("trip_adding", True))
         if st.button("Change dates", icon=":material/edit_calendar:", key="trip_redate"):
             st.session_state["trip_step"] = 0
             st.rerun()
+
+    # The map: a pin shows that spot above, a grey dot joins the comparison,
+    # open ground offers a new spot of this one's kind to download.
+    new = st.session_state.get("compare_new")
+    room = COMPARE_UP_TO - len(chosen)
+    full = f"Up to {COMPARE_UP_TO + 1} spots side by side: take one off first."
     with map_slot:
-        picked = trip_stage_map(spots, order, best, where, focus, names, totals)
-    if picked is not None and picked != focus:
-        focus_on(picked)
-        st.rerun()
+        clicked = trip_stage_map(spots, order, best, where, focus, names, totals,
+                                 [key for key in others if key not in chosen], new)
+    if clicked:
+        action, value = clicked
+        if action == "new":
+            here = spot_at(*value)
+            if here is None:
+                st.toast(f"{MODEL_NAMES[SOURCE]} has no data there.", icon=":material/info:")
+            elif spot_key(here) in spots:
+                action, value = ("focus" if spot_key(here) in order else "add"), spot_key(here)
+            elif spot_key(here) != spot_key(new or {"lat": 0, "lon": 0}):
+                st.session_state["compare_new"] = here
+                st.session_state["trip_adding"] = True
+                st.rerun()
+        if action == "focus" and value != focus:
+            focus_on(value)
+            st.rerun()
+        elif action == "add" and room:
+            add_compare(value)
+            st.rerun()
+        elif action == "add":
+            st.toast(full, icon=":material/info:")
     st.html(TRIP_FIT_SCRIPT, unsafe_allow_javascript=True)
 
     with st.container(key="trip_result"):
-        # The ranking: a row a spot, its details below on a click.
-        for place, key in enumerate(order):
-            lead = key in best
-            rank = 1 + sum(total > totals[key] for total in totals.values()) if key in totals else None
-            tags = (["Best bet"] if lead else []) + (["This spot"] if key == where else [])
-            with st.container(horizontal=True, vertical_alignment="center",
-                              key=f"trip_row_{place}{'_on' if key == focus else ''}"):
-                st.html(trip_row(names[key], source_credit(spots[key]), outlooks[key], length,
-                                 rank, tags), width="stretch")
-                st.button("Shown below" if key == focus else "Details", key=f"trip_focus_{key}",
-                          type="tertiary", disabled=key == focus, on_click=focus_on, args=(key,))
-                # This spot stays: its × is there only to keep the rows in line.
-                st.button(":material/close:", key="trip_keep" if key == where else f"trip_drop_{key}",
-                          type="tertiary", disabled=key == where, help="Take it off the list",
-                          on_click=drop_compare, args=(key,))
-
-        # Adding a spot: from your list, or anywhere on the map. Open by
-        # itself while there is nothing to compare with.
-        new = st.session_state.get("compare_new")
-        room = COMPARE_UP_TO - len(chosen)
-        if not (st.session_state.get("trip_adding") or not chosen or new):
-            st.button("Add a spot", icon=":material/add:", key="trip_add",
-                      on_click=st.session_state.__setitem__, args=("trip_adding", True))
-        else:
+        st.html(
+            f'<div class="stage-rule trip-rule">Days with <b>{wind_words(wind)}</b> for '
+            f"{lasting} h in a row {within}, in a typical year of {span}, each spot in its own "
+            "local time.</div>"
+        )
+        # Comparing another spot: the same place in the other sources, your
+        # own spots, or the map. Open by itself while there is nothing to
+        # compare with, right under the map that is part of it.
+        if st.session_state.get("trip_adding") or not chosen or new:
             with st.container(key="trip_add_panel"):
                 st.html(
-                    '<div class="add-title">Add a spot</div>'
-                    + ("" if chosen else '<div class="chapter-sub">The same dates somewhere else '
-                       "may bring more wind. Set a second spot beside this one.</div>")
+                    '<div class="add-title">Compare another spot</div>'
+                    + ("" if chosen else '<div class="chapter-sub">The same dates somewhere else, '
+                       "or the same place in other data, may tell a different story.</div>")
                 )
-                free = [key for key in others if key not in chosen]
                 if not room:
-                    st.caption(f"Up to {COMPARE_UP_TO + 1} spots side by side: take one off "
-                               "to add another.")
-                elif free:
-                    st.pills("From your spots", free, format_func=names.get, key="trip_add_pick",
-                             on_change=pick_compare)
-                kind = (STATION_NAMES[SOURCE] + " station" if STATION
-                        else MODEL_NAMES[SOURCE] + " cell")
-                st.caption(f"{'Or click' if room and free else 'Click'} the map: a dot adds or "
-                           f"takes off one of your spots, anywhere else downloads a new {kind}.")
-                clicked = compare_map(spots, where, chosen, others, names, new)
-                if isinstance(clicked, tuple):
-                    found = spot_at(*clicked)
-                    if found is None:
-                        st.toast(f"{MODEL_NAMES[SOURCE]} has no data there.", icon=":material/info:")
-                    elif spot_key(found) in spots:
-                        clicked = spot_key(found)
-                    elif spot_key(found) not in (spot_key(spot), spot_key(new or {"lat": 0, "lon": 0})):
-                        st.session_state["compare_new"] = found
-                        st.rerun()
-                if clicked in chosen:
-                    drop_compare(clicked)
-                    st.rerun()
-                elif clicked in others and room:
-                    add_compare(clicked)
-                    st.rerun()
-                elif clicked in others:
-                    st.toast(f"Up to {COMPARE_UP_TO + 1} spots side by side: take one off first.",
-                             icon=":material/info:")
+                    st.caption(full)
+                else:
+                    near = same_place(spot)
+                    if near:
+                        st.html('<div class="add-sub">Same place, other data</div>')
+                        for candidate, km in near:
+                            near_row(candidate, km, chosen)
+                    free = [key for key in others if key not in chosen]
+                    if free:
+                        st.pills("From your spots", free, format_func=names.get,
+                                 key="trip_add_pick", on_change=pick_compare)
+                    kind = (STATION_NAMES[SOURCE] + " station" if STATION
+                            else MODEL_NAMES[SOURCE] + " cell")
+                    st.caption("Or click the map above: a grey dot adds one of your spots, "
+                               f"anywhere else downloads a new {kind} there.")
                 if new:
-                    # The spot just clicked, not downloaded yet: fetch it here,
-                    # and it joins the comparison.
+                    # A spot not downloaded yet: fetch it here, and it joins
+                    # the comparison.
                     with st.container(border=True, key="compare_new_panel"):
                         st.markdown(
                             f"**{spot_title(new)}**  \n:gray[{source_credit(new)} · "
@@ -4330,12 +4428,29 @@ if st.session_state["mode"] == "window":
                     st.button("Done", key="trip_add_done",
                               on_click=st.session_state.__setitem__, args=("trip_adding", False))
 
+        # The ranking: a row a spot, its details below on a click.
+        for place, key in enumerate(order):
+            lead = key in best
+            rank = 1 + sum(total > totals[key] for total in totals.values()) if key in totals else None
+            tags = (["Best bet"] if lead else []) + (["This spot"] if key == where else [])
+            with st.container(horizontal=True, vertical_alignment="center",
+                              key=f"trip_row_{place}{'_on' if key == focus else ''}"):
+                st.html(trip_row(names[key], source_tag(spots[key]), outlooks[key], length,
+                                 rank, tags), width="stretch")
+                st.button("Shown below" if key == focus else "Details", key=f"trip_focus_{key}",
+                          type="tertiary", disabled=key == focus, on_click=focus_on, args=(key,))
+                # This spot stays: its × is there only to keep the rows in line.
+                st.button(":material/close:", key="trip_keep" if key == where else f"trip_drop_{key}",
+                          type="tertiary", disabled=key == where, help="Take it off the list",
+                          on_click=drop_compare, args=(key,))
+
         # The spot in focus, in full: every year on record, the wind and the
         # air beside the rose of where it comes from.
         found = outlooks[focus]
         days = found["days"]
         if focus in totals:
-            st.html(f'<div class="detail-title">{html.escape(names[focus])} in detail</div>')
+            st.html(f'<div class="detail-title">{html.escape(names[focus])} in detail</div>'
+                    f'<div class="detail-source">{html.escape(source_credit(spots[focus]))}</div>')
             text_col, rose_col = st.columns([3, 2], gap="large")
             rows = year_rows(days, dates)
             if rows:
