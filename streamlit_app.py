@@ -1419,14 +1419,8 @@ def load_wind(path, mtime, zone):
 
 def hour_mask(index, hours):
     """Select observations whose local hour falls inside an inclusive window."""
-    if hours is None:
-        return pd.Series(True, index=index)
     start, end = hours
-    hour = index.hour
-    if start <= end:
-        return pd.Series((hour >= start) & (hour <= end), index=index)
-    # Window wraps past midnight, e.g. 22:00 to 03:00.
-    return pd.Series((hour >= start) | (hour <= end), index=index)
+    return pd.Series((index.hour >= start) & (index.hour <= end), index=index)
 
 
 def theme_colors():
@@ -3003,7 +2997,7 @@ def ask_lasting(place, hours):
     """How many hours in a row your wind has to hold, drawn in `place`. No
     longer than your `hours` on the water: no day could hold a longer run
     inside them. Kept as one number under "lasting", whether picked or typed."""
-    longest = (hours[1] - hours[0]) % 24 + 1
+    longest = hours[1] - hours[0] + 1
     picks = [*range(1, min(LASTING_BUTTONS, longest) + 1)]
     picks += ["other"] if longest > LASTING_BUTTONS else []
     held = kept("lasting", DEFAULT_LASTING)
@@ -3603,8 +3597,7 @@ def dot_rows(rows):
 
 
 def water_hours(hours):
-    start, end = hours
-    return [(start + step) % 24 for step in range((end - start) % 24 + 1)]
+    return list(range(hours[0], hours[1] + 1))
 
 
 def best_hours(pct, hours, length=3):
@@ -3678,7 +3671,7 @@ def day_chart(share, hours):
     """Each hour of the day as nested areas, one per speed band, with your
     hours on the water shaded."""
     start, end = hours
-    spans = [(start, end + 1)] if start <= end else [(start, 24), (0, end + 1)]
+    spans = [(start, end + 1)]
     x = alt.X("hour:Q", scale=alt.Scale(domain=[0, 24]), title=None,
               axis=alt.Axis(values=list(range(0, 25, 3)), labelExpr="datum.value + 'h'",
                             ticks=False, domain=False, grid=False))
