@@ -1499,11 +1499,11 @@ def kept(key, default):
 
 
 def wind_words(wind):
-    """6–25 kn, 15+ kn or up to 12 kn: a wind range as a sailor says it."""
+    """6–25 kt, 15+ kt or up to 12 kt: a wind range as a sailor says it."""
     low, high = wind
     if high >= WIND_TOP:
-        return f"{low}+ kn"
-    return f"up to {high} kn" if low == 0 else f"{low}–{high} kn"
+        return f"{low}+ kt"
+    return f"up to {high} kt" if low == 0 else f"{low}–{high} kt"
 
 
 # A window of dates is ((month, day), (month, day)) and holds in every year:
@@ -3242,7 +3242,7 @@ def settings(mode):
     st.session_state["activity"] = activity
 
     side.subheader("Your wind")
-    remembered(side.slider, "Wind", 0, WIND_TOP, format="%d kn",
+    remembered(side.slider, "Wind", 0, WIND_TOP, format="%d kt",
                key=f"wind_{activity}", default=ACTIVITIES[activity]["groove"])
     remembered(side.select_slider, "May shift up to", SHIFT_STEPS, format_func=shift_label,
                key="shift", default=DEFAULT_SHIFT,
