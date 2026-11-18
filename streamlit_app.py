@@ -404,7 +404,6 @@ st.html(
     @media (max-width: 640px) {
         .choice-face { height: 120px; }
         .choice-face > * { zoom: .85; }
-        .choice-text { padding: 1rem 1.2rem 0; }
     }
     [class*="st-key-choice_"]:has(button:focus-visible) {
         border-color: #2dd4bf !important; box-shadow: 0 0 0 1px #2dd4bf;
@@ -1628,7 +1627,6 @@ MAP_CHROME_CSS = """
     border: 2px solid rgba(255,255,255,.9);
     box-shadow: 0 0 0 4px rgba(125,211,252,.22), 0 2px 6px rgba(0,0,0,.45);
 }
-.spot-dot.chosen { background: #fbbf24; }
 .spot-dot.picked { background: #2dd4bf; box-shadow: 0 0 0 5px rgba(45,212,191,.25), 0 2px 8px rgba(0,0,0,.5); }
 /* A station you have not downloaded: present, but quieter than your spots. */
 .spot-dot.idle {
@@ -1759,9 +1757,9 @@ WIND_FLOW_SCRIPT = """
     const field = (x, y) => {
       const lat = Math.atan(Math.sinh(Math.PI * (1 - 2 * y / world))) * 180 / Math.PI;
       const turn = 2 * Math.PI * x / world;
-      const shifted = lat - sun * (1 - Math.min(Math.abs(lat), 90) / 90);
+      const shifted = lat - sun * (1 - Math.abs(lat) / 90);
       const side = shifted < 0 ? -1 : 1;
-      const away = Math.min(Math.abs(shifted), 90);
+      const away = Math.abs(shifted);
       // Easterly where positive, westerly where negative, nothing at 0, 30, 60.
       const belt = Math.sin(away * 6 * Math.PI / 180);
       const strength = away < 30 ? 0.85 : away < 60 ? (side < 0 ? 1 : 0.85) : 0.45;
@@ -1943,10 +1941,9 @@ SPOT_HOVER_SCRIPT = """
 """
 
 
-def dot_marker(latitude, longitude, tooltip, picked=False, idle=False, chosen=False):
+def dot_marker(latitude, longitude, tooltip, picked=False, idle=False):
     """A designed dot rather than folium's default pin."""
-    classes = ("spot-dot picked" if picked else "spot-dot idle" if idle
-               else "spot-dot chosen" if chosen else "spot-dot")
+    classes = "spot-dot picked" if picked else "spot-dot idle" if idle else "spot-dot"
     return folium.Marker(
         [latitude, longitude],
         tooltip=tooltip,
@@ -2040,7 +2037,7 @@ def best_window(series_knots, length=3):
     rolled = doubled.rolling(length).mean().dropna()
     end = int(rolled.idxmax()) if not rolled.empty else 0
     start = (end - length + 1) % 24
-    return start, end, float(rolled.max()) if not rolled.empty else float("nan")
+    return start, end
 
 
 draw_list_chip()
@@ -2346,7 +2343,7 @@ if st.session_state["spot"] is None:
                                      "here for whoever else has it."):
                             unfollow(key)
                             st.rerun()
-            st.html(LINK_NOTE, unsafe_allow_javascript=True)
+            st.html(LINK_NOTE)
         spots = [
             {"lat": entry["lat"], "lon": entry["lon"], "name": spot_title(entry)}
             for entry in saved.values()
@@ -2703,7 +2700,7 @@ def rate_location(path, mtime, zone, years_back, activity, wind, lasting, hours,
     }
     overall = sum(score * RATING_WEIGHTS[name] for name, (score, _) in parts.items())
 
-    start_hour, end_hour, _ = best_window(knots)
+    start_hour, end_hour = best_window(knots)
 
     warmth = None
     if "temp_c" in usable.columns and usable["temp_c"].notna().any():
@@ -2712,7 +2709,6 @@ def rate_location(path, mtime, zone, years_back, activity, wind, lasting, hours,
         # Your days are local calendar days, without a zone.
         on_groove_days = temps[temps.index.tz_localize(None).normalize().isin(good.index[good])]
         warmth = {
-            "mean": float(temps.mean()),
             "curve": monthly.tolist(),
             "warmest_month": int(monthly.idxmax()),
             "warmest": float(monthly.max()),
@@ -2725,7 +2721,6 @@ def rate_location(path, mtime, zone, years_back, activity, wind, lasting, hours,
         "warmth": warmth,
         "overall": overall,
         "parts": parts,
-        "activity": activity,
         "groove_pct": groove,
         "too_light": too_light,
         "beaufort": beaufort(float(knots.mean())),
@@ -3383,9 +3378,8 @@ POINT_WORDS = {"N": "north", "E": "east", "S": "south", "W": "west"}
 # The styles of explore and the trip planner, sent with either view.
 ANSWER_CSS = """
 <style>
-.st-key-trip_page { max-width: 760px; }
-/* Room for the calendar: three months side by side when it is open. */
-.st-key-trip_page:has([class*="_calendar"]) { max-width: 1180px; }
+/* Room for the calendar: three months side by side. */
+.st-key-trip_page { max-width: 1180px; }
 .st-key-trip_result { max-width: 1000px; }
 .chapter-lead {
     margin-top: 1.2rem; font-size: clamp(1.3rem, 2.4vw, 1.7rem); font-weight: 700;
@@ -3404,7 +3398,7 @@ ANSWER_CSS = """
     border-radius: 50%; background: var(--c);
 }
 
-/* Days as dots: a row a month, or a row a year. They light up in order. */
+/* Days as dots: a row a year. */
 /* Dots stay day-sized however few there are, and shrink only to fit. */
 .dots { display: grid; gap: 5px; max-width: 760px; }
 .dot-row {
@@ -3469,16 +3463,10 @@ ANSWER_CSS = """
     .st-key-trip_stage, .st-key-trip_hero { animation: none; }
 }
 .st-key-trip_result { margin-top: 1.6rem; }
-.trip-block { margin-top: 1.5rem; }
-.trip-block:first-child { margin-top: .4rem; }
+.trip-block { margin-top: .4rem; }
 .band {
     display: flex; gap: 2px; max-width: 620px; height: 14px; margin-top: 1rem;
     border-radius: 7px; overflow: hidden; background: #12161f;
-}
-.band i {
-    display: block; height: 100%; transform-origin: left;
-
-
 }
 .legend b { color: #e7ebf3; }
 
@@ -3941,7 +3929,7 @@ def trip_outlook(path, mtime, zone, years_back, wind, lasting, hours, dates,
 def typical_days(days, length):
     """Days with your wind in a typical year: whole from five days up, to a
     tenth below, where a whole number would round a trip away."""
-    expected = float(days["good"].mean()) * length if len(days) else 0.0
+    expected = float(days["good"].mean()) * length
     return round(expected) if length >= 5 else round(expected, 1)
 
 
@@ -3951,18 +3939,18 @@ def wind_bands(outlook):
     return {"light": light, "good": 100 - light - strong, "strong": strong}
 
 
-def band_bar(bands, legend=True):
+def band_bar(bands):
     """Your hours on the water as one bar, too light to too strong, each
-    share named beneath it unless `legend` is off."""
+    share named beneath it."""
     parts = "".join(
-        f'<i style="width:{share}%;background:{BANDS[kind][1]};--d:{order}"></i>'
-        for order, (kind, share) in enumerate(bands.items()) if share > 0
+        f'<i style="width:{share}%;background:{BANDS[kind][1]}"></i>'
+        for kind, share in bands.items() if share > 0
     )
     named = "".join(
         f'<span style="--c:{BANDS[kind][1]}">{BANDS[kind][0]} <b>{share}%</b></span>'
         for kind, share in bands.items()
     )
-    return f'<div class="band">{parts}</div>' + (f'<div class="legend">{named}</div>' if legend else "")
+    return f'<div class="band">{parts}</div><div class="legend">{named}</div>'
 
 
 def add_compare(key):
@@ -4046,7 +4034,7 @@ def every_source(latitude, longitude, skip=None):
     for source in SOURCES:
         if source == skip:
             continue
-        other, km, why = None, None, NOTHING_HERE.get(source, "nothing here")
+        other, km, why = None, None, NOTHING_HERE.get(source)
         if source != "meteoswiss" or (south <= latitude <= north and west <= longitude <= east):
             try:
                 other = spot_at(latitude, longitude, source)
@@ -4218,7 +4206,7 @@ def trip_row(name, credit, outlook, length, rank, tags):
     """One spot on your dates, a row of the ranking: its place, the days that
     bring your wind in a typical year, and how the wind and air run."""
     days = outlook["days"]
-    if not len(days) or outlook["knots"] is None:
+    if not len(days):
         count, share, facts = "–", 0, "No record on these dates"
     else:
         count = typical_days(days, length)
@@ -4432,7 +4420,7 @@ if st.session_state["mode"] == "window":
     with st.spinner("Reading every year on record..."):
         outlooks = {key: outlook_at(key) for key in [where, *chosen]}
     totals = {key: typical_days(found["days"], length) for key, found in outlooks.items()
-              if len(found["days"]) and found["knots"] is not None}
+              if len(found["days"])}
     # Best first, yours ahead of a tie; no record on these dates, last.
     order = sorted(outlooks, key=lambda key: (-totals.get(key, -1), key != where))
     top = max(totals.values(), default=None)
@@ -4542,7 +4530,7 @@ if st.session_state["mode"] == "window":
         # you click on the map in every source, or your own spots. Open by
         # itself while there is nothing to compare with, right under the map
         # that is part of it.
-        if st.session_state.get("trip_adding") or not chosen or at:
+        if st.session_state.get("trip_adding") or not chosen:
             with st.container(key="trip_add_panel"):
                 st.html(
                     '<div class="add-title">Compare another spot</div>'
