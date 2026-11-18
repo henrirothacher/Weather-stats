@@ -1437,30 +1437,18 @@ def theme_colors():
     }
 
 
-def style_figure(fig, *axes):
-    """Drop the opaque canvas so charts sit on the app background."""
+def style_figure(fig, ax):
+    """Drop the opaque canvas so the rose sits on the app background, its
+    ticks, ring and legend in quiet colours."""
     colors = theme_colors()
     fig.patch.set_alpha(0)
-    for ax in axes:
-        ax.set_facecolor("none")
-        ax.tick_params(colors=colors["muted"], labelsize=8)
-        for spine in ax.spines.values():
-            spine.set_color(colors["grid"])
-        ax.xaxis.label.set_color(colors["muted"])
-        ax.yaxis.label.set_color(colors["muted"])
-        ax.title.set_color(colors["fg"])
-        for text in ax.texts:
-            text.set_color(colors["muted"])
-        legend = ax.get_legend()
-        if legend is not None:
-            legend.get_frame().set_alpha(0)
-            for text in legend.get_texts():
-                text.set_color(colors["muted"])
-            if legend.get_title() is not None:
-                legend.get_title().set_color(colors["muted"])
-    for legend in fig.legends:
-        for text in legend.get_texts():
-            text.set_color(colors["muted"])
+    ax.set_facecolor("none")
+    ax.tick_params(colors=colors["muted"], labelsize=8)
+    for spine in ax.spines.values():
+        spine.set_color(colors["grid"])
+    legend = ax.get_legend()
+    for text in [*legend.get_texts(), legend.get_title()]:
+        text.set_color(colors["muted"])
     return fig
 
 
@@ -1980,7 +1968,7 @@ def locator_map(latitude, longitude, key, height=230, cell=GRID):
               returned_objects=[])
 
 
-def draw_rose(direction, speed, thresholds, unit_label):
+def draw_rose(direction, speed, thresholds):
     """Where the wind comes from, coloured by how hard it blows. The radial
     scale carries no numbers — the shape and colour are the message."""
     theta, bands = rose_bands(direction, speed, thresholds)
@@ -2008,15 +1996,14 @@ def draw_rose(direction, speed, thresholds, unit_label):
     ax.plot(closed, np.append(lower, lower[0]), color=palette["fg"], lw=0.7, alpha=0.35)
 
     ax.set_xticks(np.deg2rad(np.arange(0, 360, 45)))
-    ax.set_xticklabels(["N", "NE", "E", "SE", "S", "SW", "W", "NW"], fontsize=9)
-    ax.tick_params(axis="x", colors=palette["fg"], pad=1)
+    ax.set_xticklabels(["N", "NE", "E", "SE", "S", "SW", "W", "NW"])
+    ax.tick_params(axis="x", pad=1)
     ax.set_yticklabels([])
     ax.tick_params(axis="y", length=0)
     ax.grid(color=palette["grid"], alpha=0.5, linewidth=0.6)
-    ax.spines["polar"].set_color(palette["grid"])
     ax.spines["polar"].set_linewidth(0.6)
     ax.legend(
-        title=unit_label, loc="center left", bbox_to_anchor=(1.06, 0.5),
+        title="knots", loc="center left", bbox_to_anchor=(1.06, 0.5),
         ncol=1, fontsize=8, title_fontsize=8, frameon=False, labelspacing=0.9,
     )
     style_figure(fig, ax)
@@ -3806,7 +3793,7 @@ if st.session_state["mode"] == "explore":
     with rose_col:
         section(when, "where the wind comes from in your hours")
         if here.any():
-            rose = draw_rose(direction[here], knots[here], ladder, "knots")
+            rose = draw_rose(direction[here], knots[here], ladder)
             st.pyplot(rose, width="stretch")
             plt.close(rose)
             st.caption(
@@ -4640,7 +4627,7 @@ if st.session_state["mode"] == "window":
             headings, speeds = found["rose"]
             if len(headings):
                 with rose_col:
-                    rose = draw_rose(headings, speeds, ACTIVITIES[activity]["ladder"], "knots")
+                    rose = draw_rose(headings, speeds, ACTIVITIES[activity]["ladder"])
                     st.pyplot(rose, width="stretch")
                     plt.close(rose)
                     st.caption("Where the wind comes from in your hours on these dates.")
@@ -4739,7 +4726,7 @@ if st.session_state["mode"] == "rating":
     with map_col:
         locator_map(LATITUDE, LONGITUDE, key="rating_map", height=340, cell=CELL)
     with rose_col:
-        rose = draw_rose(rating["direction"], rating["knots"], ACTIVITIES[activity]["ladder"], "knots")
+        rose = draw_rose(rating["direction"], rating["knots"], ACTIVITIES[activity]["ladder"])
         st.pyplot(rose, width="stretch")
         plt.close(rose)
     with note_col:
