@@ -3421,8 +3421,12 @@ ANSWER_CSS = """
    in teal. Rank, name, days in a typical year with a meter, the wind. */
 [class*="st-key-trip_row_"] {
     padding: .75rem .6rem .75rem 1rem !important; border: 1px solid #273043;
-    border-radius: 10px; background: #10141c;
+    border-radius: 10px; background: #10141c; flex-wrap: nowrap !important;
 }
+/* The row's text gives way, so its buttons stay on its line however many
+   tags it carries. */
+[class*="st-key-trip_row_"] > div:first-child { flex: 1 1 auto !important; min-width: 0 !important; }
+[class*="st-key-trip_row_"] > div:not(:first-child) { flex: 0 0 auto !important; }
 [class*="st-key-trip_row_"][class*="_on"] { border-color: #2dd4bf; background: #0f1a1d; }
 .trip-row {
     display: grid; align-items: center; gap: .3rem 1.2rem;
