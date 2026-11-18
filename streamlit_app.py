@@ -79,11 +79,11 @@ st.html(
     .st-key-nav button {
         border-radius: 999px; min-height: 2.15rem; padding: .2rem .95rem; font-size: .86rem;
     }
-    /* Pinned to the window, so it stays put on every screen and scroll. */
+    /* Beside the name: Streamlit Cloud's badge covers the bottom corners. */
     .app-version {
-        position: fixed; right: .9rem; bottom: .7rem; z-index: 999;
-        font-size: .72rem; font-weight: 600; letter-spacing: .04em;
-        color: #8a94a8; pointer-events: none;
+        align-self: center; padding: .12rem .45rem; border-radius: 999px;
+        border: 1px solid #273043; font-size: .7rem; font-weight: 600;
+        letter-spacing: .04em; color: #8a94a8;
     }
     </style>
     """
@@ -408,8 +408,8 @@ st.html(
 # One bar across the top of every screen. Inside a spot the way back joins it.
 topbar = st.container(horizontal=True, vertical_alignment="center", key="topbar")
 topbar.html(
-    f'<div class="app-masthead">{LOGO}<span class="mark">Wind Atlas</span></div>'
-    f'<div class="app-version">v{APP_VERSION}</div>'
+    f'<div class="app-masthead">{LOGO}<span class="mark">Wind Atlas</span>'
+    f'<span class="app-version">v{APP_VERSION}</span></div>'
 )
 
 MS_TO_KNOTS = 1.9438444924406046
