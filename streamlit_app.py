@@ -1662,8 +1662,8 @@ MAP_CHROME_CSS = """
 </style>
 """
 
-# Wind drifting over the landing map, for the look of it: the flow is a
-# made-up field, not measured or forecast wind. It is drawn on a canvas in a
+# Wind drifting over the landing map: the earth's wind belts as a textbook
+# draws them, not measured or forecast wind. It is drawn on a canvas in a
 # pane of the map's own, above the tiles and the AROME outline and under the
 # dots, and lets every click through. Like the hover script below it runs in
 # the page and reaches into the map's frame; it checks for a new map now and
@@ -1712,7 +1712,8 @@ WIND_FLOW_SCRIPT = """
     pane.appendChild(canvas);
     const ctx = canvas.getContext("2d");
     const ratio = view.devicePixelRatio || 1;
-    let w = 0, h = 0, moving = false, particles = [];
+    // The world's width in pixels at this zoom: the map's own scale.
+    let w = 0, h = 0, world = 256, moving = false, particles = [];
 
     // Each trail is its own last positions, redrawn every frame, so nothing
     // is left behind on the map. A trail that has run its course stops
@@ -1725,6 +1726,7 @@ WIND_FLOW_SCRIPT = """
     const place = () => {
       const size = map.getSize();
       w = size.x; h = size.y;
+      world = 256 * Math.pow(2, map.getZoom());
       canvas.width = w * ratio; canvas.height = h * ratio;
       canvas.style.width = w + "px"; canvas.style.height = h + "px";
       L.DomUtil.setPosition(canvas, map.containerPointToLayerPoint([0, 0]));
@@ -1735,14 +1737,37 @@ WIND_FLOW_SCRIPT = """
         return p;
       });
     };
-    // Direction and speed by place on the map, in its own pixels, so a
-    // pan carries the pattern with it: broad westerlies bending round eddies.
+    // The wind belts as a geography book draws them, by latitude: calm at
+    // the equator, the trades blowing towards it from about 5 to 30 degrees
+    // (from the NE in the north, the SE in the south), calm again near 30,
+    // westerlies to 60 (strongest in the Southern Ocean) and weak polar
+    // easterlies beyond. The belts follow the sun a few degrees north and
+    // south through the year, less so towards the poles. A slow wobble tied
+    // to the earth keeps them from looking like stripes and turns the calms
+    // into light air from anywhere. In pixels a frame, from x and y in the
+    // map's world pixels, and never faster than 0.32, as before.
+    const today = new Date();
+    const day = (today - new Date(today.getFullYear(), 0, 1)) / 864e5;
+    // Furthest north in early August, furthest south in early February.
+    const sun = 4 + 4 * Math.cos(2 * Math.PI * (day - 220) / 365);
     const field = (x, y) => {
-      const u = x / 520, v = y / 520;
-      const angle = 0.55 * Math.sin(v * 1.6 + Math.cos(u * 0.8))
-                  + 0.35 * Math.cos(u * 1.3 - v * 0.7);
-      const speed = 0.18 + 0.14 * (0.5 + 0.5 * Math.sin(u * 0.6 + v * 1.1));
-      return [Math.cos(angle) * speed, Math.sin(angle) * speed];
+      const lat = Math.atan(Math.sinh(Math.PI * (1 - 2 * y / world))) * 180 / Math.PI;
+      const turn = 2 * Math.PI * x / world;
+      const shifted = lat - sun * (1 - Math.min(Math.abs(lat), 90) / 90);
+      const side = shifted < 0 ? -1 : 1;
+      const away = Math.min(Math.abs(shifted), 90);
+      // Easterly where positive, westerly where negative, nothing at 0, 30, 60.
+      const belt = Math.sin(away * 6 * Math.PI / 180);
+      const strength = away < 30 ? 0.85 : away < 60 ? (side < 0 ? 1 : 0.85) : 0.45;
+      const wobble = Math.sin(3 * turn + 1.7 * Math.cos(lat * 0.08))
+                   + 0.6 * Math.cos(7 * turn - lat * 0.07);
+      // East and north: the belt's wind, turned towards the equator in the
+      // trades and away from it in the westerlies, plus the light air.
+      const east = -belt + 0.3 * Math.cos(2.5 * wobble);
+      const north = -side * 0.45 * belt + 0.3 * Math.sin(2.5 * wobble);
+      const angle = Math.atan2(north, east) + 0.2 * wobble;
+      const speed = 0.05 + 0.27 * strength * Math.abs(belt);
+      return [Math.cos(angle) * speed, -Math.sin(angle) * speed];
     };
 
     map.on("movestart zoomstart", () => { moving = true; ctx.clearRect(0, 0, w, h); });
