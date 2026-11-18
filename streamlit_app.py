@@ -29,7 +29,7 @@ st.set_page_config(
 )
 
 # Goes up by 0.1 with every commit pushed to GitHub (3.0 -> 3.1).
-APP_VERSION = "3.1"
+APP_VERSION = "3.2"
 
 def svg_image(markup, view_box, css_class=""):
     """A drawing for st.html. Its sanitiser drops <svg> outright but lets an
@@ -252,13 +252,20 @@ st.html(
     }
     .section-label small { font-size: .82rem; font-weight: 500; color: #8a94a8; }
 
-    /* Saved spots as list rows: hover finds them on the map, Open reopens. */
+    /* Saved spots as list rows: hover finds them on the map, Open reopens.
+       The list scrolls past this height, so the zoom buttons below the
+       floating list stay clear, and its rows keep their own height rather
+       than squeeze to fit. */
+    .st-key-spot_rows { max-height: 430px; overflow-y: auto; flex-wrap: nowrap; }
     [class*="st-key-spot_card_"] {
-        border: 1px solid #273043; border-radius: 4px;
+        border: 1px solid #273043; border-radius: 4px; flex-shrink: 0 !important;
         background: #10141c; padding: .55rem .7rem .55rem .85rem;
     }
     [class*="st-key-spot_card_"]:hover { border-color: #3a4558; background: #161b27; }
+    /* Streamlit pulls text up by the paragraph gap that is taken away here,
+       which pushed each row's last line onto its border. */
     [class*="st-key-spot_card_"] p { margin-bottom: 0; line-height: 1.45; }
+    [class*="st-key-spot_card_"] [data-testid="stMarkdownContainer"] { margin-bottom: 0; }
     /* Text and Open button share one line; the text wraps instead. */
     [class*="st-key-spot_card_"] { flex-wrap: nowrap !important; }
     [class*="st-key-spot_card_"] > div:first-child { flex: 1 1 auto !important; min-width: 0 !important; }
@@ -1789,10 +1796,6 @@ WIND_FLOW_SCRIPT = """
 # page styles stretch its frame to the window, and FILL_FRAME_CSS, inside the
 # frame, has the map follow: streamlit_folium otherwise fixes it in pixels.
 LANDING_MAP_HEIGHT = 700
-# Your spots float over the map's right side, a row each, scrolling past
-# this height so the zoom buttons below stay clear.
-SPOT_ROW_HEIGHT = 104
-SPOT_LIST_MAX = 430
 FILL_FRAME_CSS = """
 <style>
 #map_div, #map_div2 { height: 100vh !important; }
@@ -2241,10 +2244,9 @@ if st.session_state["spot"] is None:
                 '<div class="section-label">Your spots'
                 f"<small>{len(saved)} in your link · hover to find on the map</small></div>"
             )
-            # Same height as the map, less the note below it, scrolling once
-            # the list outgrows it.
-            list_height = min(SPOT_LIST_MAX, SPOT_ROW_HEIGHT * len(saved))
-            with st.container(height=list_height, gap="xsmall", border=False):
+            # As tall as its rows, scrolling once it outgrows the space
+            # above the zoom buttons (see "spot_rows" in the styles).
+            with st.container(gap="xsmall", key="spot_rows"):
                 for index, (key, entry) in enumerate(saved.items()):
                     if entry.get("station"):
                         where = (f"{STATION_NAMES[entry['source']]} {entry['station']} · "
