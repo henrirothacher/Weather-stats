@@ -744,6 +744,19 @@ def metar_stations():
     return table.sort_values("name")
 
 
+def station_table(source):
+    """The stations of a station source, MeteoSwiss's or the airports'."""
+    return meteoswiss_stations() if source == "meteoswiss" else metar_stations()
+
+
+def station_entry(source, abbr, row):
+    """Station `abbr` of `source` as a spot, from its row in station_table()."""
+    latitude, longitude = float(row["lat"]), float(row["lon"])
+    return {"lat": latitude, "lon": longitude, "source": source, "station": abbr,
+            "height": float(row["height"]), "name": str(row["name"]),
+            "zone": timezone_at(latitude, longitude)}
+
+
 PLACES = data_dir / "places.csv"
 
 
@@ -999,7 +1012,7 @@ def by_hour(frame):
     return frame.assign(time=stamp).drop_duplicates("time", keep="last").set_index("time").sort_index()
 
 
-def fetch_station(spot, target, progress=None):
+def fetch_station(spot, target, progress):
     """Every hourly reading MeteoSwiss holds for a station, joined into one
     record. A station that measures no air temperature borrows it from the
     nearest one that does, 0.65 °C warmer for every 100 m it stands lower.
@@ -1021,8 +1034,7 @@ def fetch_station(spot, target, progress=None):
             for _, url in files
         ]
         for done, _ in enumerate(as_completed(jobs), 1):
-            if progress:
-                progress(done, len(jobs))
+            progress(done, len(jobs))
 
     def joined(station):
         """A station's files in URL order, not arrival order, for the recent-wins rule."""
@@ -1110,7 +1122,7 @@ def open_meteo(spot, first, last):
         return answer
 
 
-def fetch_arome(spot, target, progress=None):
+def fetch_arome(spot, target, progress):
     """Every hour of AROME HD that Open-Meteo holds for a cell, from the first
     day of its archive to yesterday, a year at a time. `progress(done,
     total)` hears about each year as it lands."""
@@ -1120,8 +1132,7 @@ def fetch_arome(spot, target, progress=None):
     for done, year in enumerate(years, 1):
         answer = open_meteo(spot, max(AROME_SINCE, date(year, 1, 1)), min(last, date(year, 12, 31)))
         pieces.append(pd.DataFrame(answer["hourly"]))
-        if progress:
-            progress(done, len(years))
+        progress(done, len(years))
     frame = pd.concat(pieces, ignore_index=True).dropna(subset=["wind_speed_10m", "wind_direction_10m"])
     if frame.empty:
         raise RuntimeError("Open-Meteo holds no AROME hours for this cell")
@@ -1316,15 +1327,10 @@ def spot_from_key(key, registry):
                       if prefix == station.group(1))
         if entry is None:
             try:
-                table = meteoswiss_stations() if source == "meteoswiss" else metar_stations()
-                row = table.loc[station.group(2)]
+                row = station_table(source).loc[station.group(2)]
             except Exception:
                 return None
-            entry = {
-                "lat": float(row["lat"]), "lon": float(row["lon"]), "name": str(row["name"]),
-                "station": station.group(2), "height": float(row["height"]),
-                "zone": timezone_at(float(row["lat"]), float(row["lon"])),
-            }
+            entry = station_entry(source, station.group(2), row)
     else:
         return None
     spot = {**entry, "source": source}
@@ -2102,7 +2108,7 @@ if st.session_state["spot"] is None:
     stations, stations_error = None, None
     if source in STATION_FILES:
         try:
-            stations = meteoswiss_stations() if source == "meteoswiss" else metar_stations()
+            stations = station_table(source)
         except Exception as error:
             stations_error = error
     if stations is not None and by_water:
@@ -2356,11 +2362,7 @@ if st.session_state["spot"] is None:
 
     if picked:
         row = stations.loc[picked]
-        station = {
-            "lat": float(row["lat"]), "lon": float(row["lon"]),
-            "zone": timezone_at(row["lat"], row["lon"]),
-            "source": source, "station": picked, "height": float(row["height"]),
-        }
+        station = station_entry(source, picked, row)
         cached = spot_path(station)
         where = f"{source_credit(station)} · {coords_label(row['lat'], row['lon'])}"
         km = st.session_state.get("station_click_km")
@@ -2521,12 +2523,31 @@ def fetch_era5(spot, target, first):
     unpack_download(download_path, target)
 
 
+def fetch_here(entry, show, first=None):
+    """Download a spot's record behind `show`, the bar of the loading screen
+    or of a row: ERA5 from `first`, or the last twenty years."""
+    target = spot_path(entry)
+    if entry["source"] == "metar":
+        show(None, "The Iowa Environmental Mesonet is gathering every report...")
+        fetch_metar(entry, target)
+    elif entry["source"] == "meteoswiss":
+        show(None, "Asking MeteoSwiss for the station's files...")
+        fetch_station(entry, target, progress=counting(show, "files"))
+    elif entry["source"] == "arome":
+        show(None, "Asking Open-Meteo for the first year...")
+        fetch_arome(entry, target, progress=counting(show, "years"))
+    else:
+        show(None, "Copernicus is preparing the data: this can take a while...")
+        fetch_era5(entry, target, first or date(date.today().year - 19, 1, 1))
+
+
 if not dataset_path.exists() or "fetch_first" in st.session_state:
     # Nothing to press and nothing to click: the record lands behind one bar.
     # ERA5 brings the last twenty years at first, and every year since 1940
     # when asked from the filter, which sets `fetch_first` on a record in hand.
     where = (f"{STATION_NAMES[SOURCE]} station {STATION} · {spot['height']:.0f} m" if STATION
              else f"{MODEL_NAMES[SOURCE]} cell {LATITUDE:+.2f}, {LONGITUDE:+.2f}")
+    first = st.session_state.get("fetch_first") or date(date.today().year - 19, 1, 1)
     if SOURCE == "metar":
         note = ("Every report the airport has sent, from the Iowa Environmental Mesonet's "
                 "archive; no account needed. It can take a minute.")
@@ -2542,30 +2563,15 @@ if not dataset_path.exists() or "fetch_first" in st.session_state:
                 "it is the first hours of each forecast run stitched together, not a "
                 "reanalysis, and only a few years of them: one odd summer carries weight.")
     else:
-        first = st.session_state.get("fetch_first") or date(date.today().year - 19, 1, 1)
         note = (f"Every hour from {first:%B %Y} to today, prepared on Copernicus' side; "
                 + ("every year since 1940 can follow later, from Years in the filter. "
                    if first.year > 1940 else "")
                 + "Nothing to do but wait: this can take a while.")
     show, clear = loading_screen(f"{where} · {LOCAL_TZ}. {note}")
-    show(None, {
-        "metar": "The Iowa Environmental Mesonet is gathering every report...",
-        "meteoswiss": "Asking MeteoSwiss for the station's files...",
-        "arome": "Asking Open-Meteo for the first year...",
-        "era5": "Copernicus is preparing the data...",
-    }[SOURCE])
-    if SOURCE == "metar":
-        fetch_now(lambda: fetch_metar(spot, dataset_path), "airport", clear)
-    elif SOURCE == "meteoswiss":
-        fetch_now(lambda: fetch_station(spot, dataset_path, progress=counting(show, "files")),
-                  "station", clear)
-    elif SOURCE == "arome":
-        fetch_now(lambda: fetch_arome(spot, dataset_path, progress=counting(show, "years")),
-                  "cell", clear)
-    else:
-        fetch_now(lambda: fetch_era5(spot, dataset_path, first), "location", clear,
-                  hint="If this is the deployed app, add your Copernicus token under "
-                  "Settings → Secrets (see .streamlit/secrets.toml.example).")
+    what = {"metar": "airport", "meteoswiss": "station", "arome": "cell", "era5": "location"}[SOURCE]
+    hint = ("If this is the deployed app, add your Copernicus token under Settings → Secrets "
+            "(see .streamlit/secrets.toml.example)." if SOURCE == "era5" else None)
+    fetch_now(lambda: fetch_here(spot, show, first), what, clear, hint)
 
 df = load_wind(dataset_path, dataset_path.stat().st_mtime, LOCAL_TZ)
 data_start = df.index.min().date()
@@ -3973,21 +3979,18 @@ def spot_at(latitude, longitude, source=None):
     the source has nothing there."""
     source = source or SOURCE
     if source in STATION_FILES:
-        table = meteoswiss_stations() if source == "meteoswiss" else metar_stations()
+        table = station_table(source)
         abbr = km_from(latitude, longitude, table["lat"], table["lon"]).idxmin()
-        row = table.loc[abbr]
-        found = {"lat": float(row["lat"]), "lon": float(row["lon"]), "source": source,
-                 "station": abbr, "height": float(row["height"]), "name": str(row["name"])}
+        found = station_entry(source, abbr, table.loc[abbr])
     elif source == "arome" and not in_arome_area(latitude, longitude):
         return None
     else:
         grid = CELL_GRIDS[source]
-        found = {"lat": snap_to_grid(latitude, grid), "lon": snap_to_grid(longitude, grid),
-                 "source": source}
-        found["name"] = place_name(found["lat"], found["lon"])
+        latitude, longitude = snap_to_grid(latitude, grid), snap_to_grid(longitude, grid)
+        found = {"lat": latitude, "lon": longitude, "source": source,
+                 "name": place_name(latitude, longitude), "zone": timezone_at(latitude, longitude)}
     known = load_registry().get(spot_key(found), {})
-    return {**found, "zone": timezone_at(found["lat"], found["lon"]),
-            "name": known.get("name") or found["name"]}
+    return {**found, "name": known.get("name") or found["name"]}
 
 
 # How far the nearest station may be and still be offered for a place:
@@ -4027,23 +4030,6 @@ def every_source(latitude, longitude, skip=None):
                 other = None
         rows.append((source, other, km, why))
     return rows
-
-
-def fetch_here(entry, show):
-    """Download a spot's record as the loading screen would, behind `show`."""
-    target = spot_path(entry)
-    if entry["source"] == "metar":
-        show(None, "The Iowa Environmental Mesonet is gathering every report...")
-        fetch_metar(entry, target)
-    elif entry["source"] == "meteoswiss":
-        show(None, "Asking MeteoSwiss for the station's files...")
-        fetch_station(entry, target, progress=counting(show, "files"))
-    elif entry["source"] == "arome":
-        show(None, "Asking Open-Meteo for the first year...")
-        fetch_arome(entry, target, progress=counting(show, "years"))
-    else:
-        show(None, "Copernicus is preparing the data: this can take a while...")
-        fetch_era5(entry, target, date(date.today().year - 19, 1, 1))
 
 
 # How long a new spot takes to download, as short as a row can take it.
