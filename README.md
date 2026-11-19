@@ -34,7 +34,7 @@ Natural Earth's named seas and lakes, and the town nearby, from
 CC BY 4.0): "Lake Balaton near Tapolca", "Strait of Gibraltar, 26 km N of
 Tangier".
 
-Plan a trip asks for your dates, then answers two things on one page. At
+Compare asks for your dates, then answers two things on one page. At
 the top, one big button compares the spot with others on those dates, with
 a map beside it. The button lists your spots in the spot's own data first,
 AROME beside AROME, then the same place in each other source, then the
@@ -44,7 +44,7 @@ table, best first, each with how many more or fewer days it gets than
 yours. Below, When to go shows the best days of the year for your wind,
 with your dates marked, and then your dates in full.
 
-A day counts, in the rating and the trip planner alike, when your wind
+A day counts, in the rating and in Compare alike, when your wind
 holds for your hours in a row, the direction swings no more than you
 allow, and every hour feels at least as warm as you ask, wind chill
 counted (the Environment Canada and US National Weather Service index).

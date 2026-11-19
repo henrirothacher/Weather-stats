@@ -393,7 +393,7 @@ st.html(
         gap: 1.5rem; background: #0a0d14; border-bottom: 1px solid #1a2030;
     }
     .choice-face > * { zoom: 1.35; }
-    /* Narrower cards, smaller drawings, so the two weeks of Plan a trip
+    /* Narrower cards, smaller drawings, so the two weeks of Compare
        always fit. Below 640px the cards stack, one to a row. */
     @media (max-width: 1299px) {
         .choice-face { height: 160px; }
@@ -497,7 +497,7 @@ st.html(
         28%           { background: color-mix(in srgb, var(--tone) 55%, #181d29); }
     }
 
-    /* Plan a trip: two weeks with a frame stepping along them. */
+    /* Compare: two weeks with a frame stepping along them. */
     .choice-face .days { position: relative; display: flex; gap: 4px; }
     .choice-face .day { display: flex; flex-direction: column; align-items: center; gap: 5px; }
     .choice-face .day i { width: 16px; height: 28px; border-radius: 3px; background: #181d29; }
@@ -516,7 +516,7 @@ st.html(
     }
     @media (prefers-reduced-motion: reduce) { .choice-face * { animation: none !important; } }
 
-    /* The trip planner's question. */
+    /* The compare view's question. */
     .view-title { font-size: 1.9rem; font-weight: 700; letter-spacing: -.02em; line-height: 1.15; margin-bottom: .9rem; }
     .st-key-asking {
         border: 1px solid #273043; border-radius: 8px;
@@ -576,7 +576,7 @@ RATING_WEIGHTS = {
 # Top of the wind slider in explore, in knots.
 WIND_TOP = 50
 LOOKBACK = {"10 years": 10, "20 years": 20, "All": None}
-# Where explore and the trip planner start, before you change anything.
+# Where explore and the compare view start, before you change anything.
 DEFAULT_HOURS = (10, 17)
 DEFAULT_LASTING = 3
 # How far the wind may swing over those hours, in degrees, or any amount.
@@ -2632,7 +2632,7 @@ def rate_location(path, mtime, zone, years_back, activity, wind, lasting, hours,
                   shift=None, feels=None):
     """Score a spot for one activity, over its own last `years_back` years
     and your hours on the water. A day counts as it does in explore and the
-    trip planner: your wind holds `lasting` hours in a row, swinging no more
+    compare view: your wind holds `lasting` hours in a row, swinging no more
     than `shift` degrees and feeling at least `feels` °C. The weights are a
     judgement call — the four parts are shown so you can disagree."""
     frame = load_wind(path, mtime, zone)
@@ -2838,8 +2838,8 @@ CHOICES = [
     ("rating", "Rate this spot", "One score out of ten for what you sail.", "Rate it"),
     ("explore", "All the stats for this spot",
      "Windy days by month, the wind rose, every year and the numbers.", "Explore"),
-    ("window", "Plan a trip", "Compare this spot with other spots on your dates, and find when to go.",
-     "Plan a trip"),
+    ("window", "Compare", "Compare this spot with other spots on your dates, and find when to go.",
+     "Compare"),
 ]
 # Knots across the sport's ruler: enough for the kite's top end.
 GROOVE_SCALE = 40
@@ -2865,7 +2865,7 @@ def grid_face():
 
 
 def days_face():
-    """Plan a trip: two weeks, a frame stepping along them."""
+    """Compare: two weeks, a frame stepping along them."""
     return '<div class="days">' + "".join(
         f'<span class="day"><small>{letter}</small><i></i></span>' for letter in "MTWTFSS" * 2
     ) + '<span class="days-frame"><span></span></span></div>'
@@ -2946,7 +2946,7 @@ if st.session_state["mode"] is None:
             if st.button(action, key=f"pick_{target}", width="stretch", disabled=locked):
                 st.session_state["mode"] = target
                 st.session_state.pop("last_mode", None)
-                # The trip planner starts from its first question every time.
+                # The compare view starts from its first question every time.
                 st.session_state["trip_step"] = 0
                 st.rerun()
     small_print()
@@ -2954,7 +2954,7 @@ if st.session_state["mode"] is None:
 
 
 # --- The filter and the trip's dates -------------------------------------
-# The trip planner asks one question, your dates; the rest of its filter is
+# The compare view asks one question, your dates; the rest of its filter is
 # in the sidebar beside the answer, and the spots it compares are picked in
 # a window of their own. The rating has the same sidebar, and the settings share their
 # keys, so one given in either view is already there in the other.
@@ -3252,7 +3252,7 @@ def ask_dates(key, default, longest=365):
 
 
 def ask_trip_dates(title, default):
-    """The trip planner's one question, your dates: the run stops here until
+    """The compare view's one question, your dates: the run stops here until
     Show me, and Change dates beside the answer's title comes back to it."""
     if st.session_state.setdefault("trip_step", 0):
         return
@@ -3322,11 +3322,11 @@ def settings():
     return activity
 
 
-# --- Shared by explore and the trip planner ------------------------------
+# --- Shared by explore and the compare view ------------------------------
 
 POINT_WORDS = {"N": "north", "E": "east", "S": "south", "W": "west"}
 
-# The styles of explore and the trip planner, sent with either view.
+# The styles of explore and the compare view, sent with either view.
 ANSWER_CSS = """
 <style>
 /* Room for the calendar: three months side by side. */
@@ -3363,7 +3363,7 @@ ANSWER_CSS = """
 .dot-count { font-size: .8rem; font-weight: 700; text-align: right; color: #e7ebf3; font-variant-numeric: tabular-nums; }
 
 
-/* The trip planner's page, in one column: where and when on top, then the
+/* The compare view's page, in one column: where and when on top, then the
    one big button to compare or, once you have, the spots side by side,
    then when to go. */
 .trip-when { display: flex; flex-wrap: wrap; align-items: baseline; gap: .2rem .8rem; }
@@ -3813,7 +3813,7 @@ if st.session_state["mode"] == "explore":
     st.stop()
 
 
-# --- Plan a trip: your dates, then what to expect --------------------------
+# --- Compare: your dates, then what to expect ------------------------------
 # Your dates, a regatta or a week away, at this spot: you pick the days, and
 # the wind you need and your hours on the water come from the filter on the
 # left. Then one page with two things on it, one under the other. On top, a
@@ -4404,7 +4404,7 @@ if st.session_state["mode"] == "window":
     if where is None:
         where, spots = "here", {"here": {**spot, "path": dataset_path}, **spots}
     default_dates = coming_dates(*TRIP_DAYS)
-    ask_trip_dates(f"Plan a trip to {html.escape(LOCATION_NAME)}", default_dates)
+    ask_trip_dates(f"Compare {html.escape(LOCATION_NAME)}", default_dates)
 
     activity = settings()
     dates = kept("trip_dates", default_dates)
@@ -4453,7 +4453,7 @@ if st.session_state["mode"] == "window":
 
     with st.container(key="trip_main"):
         # --- Where, when, and by which rule ---
-        st.html(f'<div class="view-title">Plan a trip to {html.escape(LOCATION_NAME)}</div>')
+        st.html(f'<div class="view-title">Compare {html.escape(LOCATION_NAME)}</div>')
         with st.container(horizontal=True, vertical_alignment="center", gap="small",
                           key="trip_when"):
             st.html(f'<div class="trip-when"><b>{dates_label(dates)}</b>'
@@ -4678,7 +4678,7 @@ if st.session_state["mode"] == "rating":
             "score. Pick what you sail in the filter."
         )
         st.stop()
-    # The same settings the trip planner counts with.
+    # The same settings the compare view counts with.
     wind = tuple(kept(f"wind_{activity}", ACTIVITIES[activity]["groove"]))
     hours = tuple(kept("hours", DEFAULT_HOURS))
     lasting = kept("lasting", DEFAULT_LASTING)
