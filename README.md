@@ -34,10 +34,15 @@ Natural Earth's named seas and lakes, and the town nearby, from
 CC BY 4.0): "Lake Balaton near Tapolca", "Strait of Gibraltar, 26 km N of
 Tangier".
 
-Comparing spots keeps to one kind by default, stations with stations and
-model cells with model cells; a switch in the trip planner's comparison
-opens it to all. The comparison starts with your three nearest spots; click
-others on its map, or anywhere else to download a new one there.
+Plan a trip asks for your dates, then answers two things on one page. At
+the top, one big button compares the spot with others on those dates, with
+a map beside it. The button lists your spots in the spot's own data first,
+AROME beside AROME, then the same place in each other source, then the
+rest of your spots. The map fetches a new spot where you click, in the
+spot's own data or any other. The spots then stand side by side in one
+table, best first, each with how many more or fewer days it gets than
+yours. Below, When to go shows the best days of the year for your wind,
+with your dates marked, and then your dates in full.
 
 A day counts, in the rating and the trip planner alike, when your wind
 holds for your hours in a row, the direction swings no more than you
