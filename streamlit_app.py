@@ -2946,8 +2946,10 @@ if st.session_state["mode"] is None:
             if st.button(action, key=f"pick_{target}", width="stretch", disabled=locked):
                 st.session_state["mode"] = target
                 st.session_state.pop("last_mode", None)
-                # The compare view starts from its first question every time.
+                # The compare view starts from its first question every time,
+                # with this spot spelled out under the table.
                 st.session_state["trip_step"] = 0
+                st.session_state.pop("trip_shown", None)
                 st.rerun()
     small_print()
     st.stop()
@@ -3400,7 +3402,7 @@ ANSWER_CSS = """
 
 /* The comparison: a row a spot, best first, the same figure in the same
    column all the way down, so the differences read at a glance. */
-.cmp { display: grid; gap: .5rem; margin-top: 1rem; }
+.st-key-cmp { margin-top: 1rem; }
 .cmp-head, .cmp-row {
     display: grid; align-items: center; gap: .4rem 1.2rem;
     grid-template-columns: minmax(0, 1.7fr) minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, .8fr) minmax(0, 1fr);
@@ -3409,8 +3411,26 @@ ANSWER_CSS = """
     padding: 0 1rem; font-size: .68rem; letter-spacing: .1em; text-transform: uppercase;
     color: #8a94a8;
 }
-.cmp-row { padding: .85rem 1rem; border: 1px solid #273043; border-radius: 10px; background: #10141c; }
-.cmp-row.best { border-color: #2dd4bf; background: #0f1a1d; }
+.cmp-row {
+    padding: .85rem 1rem; border: 1px solid #273043; border-radius: 10px; background: #10141c;
+    transition: border-color .15s ease, background-color .15s ease;
+}
+/* The spot spelled out under the table, edged in teal. */
+.cmp-row.shown { border-color: #2dd4bf; background: #0f1a1d; box-shadow: 0 0 0 1px #2dd4bf; }
+/* A row is a button: an invisible one over the whole of it takes the click,
+   its words left for screen readers. */
+[class*="st-key-cmprow_"] { position: relative; }
+[class*="st-key-cmprow_"]:hover .cmp-row:not(.shown) { border-color: #4b5770; background: #131924; }
+[class*="st-key-cmprow_"]:has(button:focus-visible) .cmp-row { border-color: #7dd3fc; }
+[class*="st-key-cmpshow_"] { position: absolute; inset: 0; z-index: 2; width: auto !important; }
+[class*="st-key-cmpshow_"] .stButton, [class*="st-key-cmpshow_"] button { width: 100%; height: 100%; }
+[class*="st-key-cmpshow_"] button {
+    border-radius: 10px; background: transparent !important; border: 0 !important;
+    box-shadow: none !important;
+}
+[class*="st-key-cmpshow_"] button > div {
+    position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%);
+}
 .cmp-spot { min-width: 0; }
 .cmp-spot b {
     display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
@@ -3819,8 +3839,9 @@ if st.session_state["mode"] == "explore":
 # left. Then one page with two things on it, one under the other. On top, a
 # big button that compares this spot with others on your dates, in its own
 # data to start with and in any other at a click; once you have, the spots
-# side by side in one table. Below it, when to go here: the best days of the
-# year for your wind, then your dates in full.
+# side by side in one table. Below it, when to go: the best days of the year
+# for your wind, then your dates in full, here or at the spot you click in
+# the table.
 
 DATES_HINT = ("Every year on record is checked on these days. Wind and hours on the water "
               "are set in the filter.")
@@ -4343,12 +4364,20 @@ def years_held(days):
     return f"{years.min()}–{years.max()}" if years.min() < years.max() else str(years.min())
 
 
-def compare_table(order, spots, names, outlooks, totals, best, where, length, bare):
+def show_below(key):
+    """Spell this compared spot out under the table: when to go, and your dates."""
+    st.session_state["trip_shown"] = key
+
+
+def compare_table(order, spots, names, outlooks, totals, best, where, shown, length, bare):
     """The spots side by side, a row each, best first, so the differences
     read at a glance: the days with your wind and how many more or fewer
     than at this spot, the usual wind, where it comes from as an arrow
-    blowing that way, and the air. `bare` puts a count as a figure."""
-    rows = []
+    blowing that way, and the air. `bare` puts a count as a figure. A row
+    is a button: click it and the chapter under the table is about that
+    spot. `shown` is the one it is about now, edged in teal."""
+    st.html('<div class="cmp-head"><span>Spot</span><span>Days with your wind</span>'
+            "<span>Usual wind</span><span>From</span><span>Air</span></div>")
     for key in order:
         found = outlooks[key]
         tags = (('<span class="tag">Best bet</span>' if key in best else "")
@@ -4383,11 +4412,12 @@ def compare_table(order, spots, names, outlooks, totals, best, where, length, ba
                 "<small>wind from</small></span></span>",
                 f'<span class="cmp-cell"><b>{air_value}</b><small>{air_note}</small></span>',
             ]
-        kinds = "".join(kind for kind, on in ((" best", key in best), (" here", key == where)) if on)
-        rows.append(f'<div class="cmp-row{kinds}">{"".join(cells)}</div>')
-    head = ('<div class="cmp-head"><span>Spot</span><span>Days with your wind</span>'
-            "<span>Usual wind</span><span>From</span><span>Air</span></div>")
-    return f'<div class="cmp">{head}{"".join(rows)}</div>'
+        kinds = "".join(kind for kind, on in ((" best", key in best), (" shown", key == shown))
+                        if on)
+        with st.container(key=f"cmprow_{key}"):
+            st.html(f'<div class="cmp-row{kinds}">{"".join(cells)}</div>')
+            st.button(f"Show {names[key]} below", key=f"cmpshow_{key}", on_click=show_below,
+                      args=(key,))
 
 
 # Down to "When to go", for whoever does not want to compare.
@@ -4419,9 +4449,12 @@ if st.session_state["mode"] == "window":
         "at any hour" if hours == (0, 23)
         else f"between {hours[0]:02d}:00 and {hours[1]:02d}:59 local time"
     )
-    # The years counted at this spot: the filter's, or fewer where its record is shorter.
-    first_year = lookback_start(df, years_back)
-    years_text = f"{first_year}–{data_end.year}" if first_year < data_end.year else str(first_year)
+    def years_counted(key):
+        """The years counted at a spot: the filter's, or fewer where its record is shorter."""
+        path = spots[key]["path"]
+        frame = load_wind(path, path.stat().st_mtime, spots[key]["zone"])
+        first, last = lookback_start(frame, years_back), frame.index.max().year
+        return f"{first}–{last}" if first < last else str(first)
 
     def outlook_at(key):
         path = spots[key]["path"]
@@ -4432,13 +4465,20 @@ if st.session_state["mode"] == "window":
     # added, best first.
     chosen = compared_keys(spots, where)
     st.session_state["trip_compare"] = chosen
+    # The spot spelled out under the table: this one, or one you clicked in it.
+    shown = st.session_state.get("trip_shown")
+    if shown not in (where, *chosen):
+        shown = where
+    st.session_state["trip_shown"] = shown
     with st.spinner("Reading every year on record..."):
         outlooks = {key: outlook_at(key) for key in [where, *chosen]}
-        chances = year_chances(dataset_path, dataset_path.stat().st_mtime, LOCAL_TZ, years_back,
-                               wind, lasting, hours, shift, feels)
+        shown_path = spots[shown]["path"]
+        chances = year_chances(shown_path, shown_path.stat().st_mtime, spots[shown]["zone"],
+                               years_back, wind, lasting, hours, shift, feels)
     totals = {key: typical_days(found["days"], length) for key, found in outlooks.items()
               if len(found["days"])}
     names = told_apart(list(outlooks), spots)
+    shown_name = html.escape(LOCATION_NAME if shown == where else names[shown])
     out_of = f"of your {length} days"
     days_word = "day" if length == 1 else "days"
 
@@ -4473,7 +4513,8 @@ if st.session_state["mode"] == "window":
             f'<div class="trip-answer">{answer}</div>'
             f'<div class="stage-rule">A day counts when <b>{wind_words(wind)}</b> blows for '
             f"{lasting} h in a row {within}{rule_words(shift, feels)}. Counted over "
-            f"{years_held(outlooks[where]['days']) or years_text}. Change it in the filter.</div>"
+            f"{years_held(outlooks[where]['days']) or years_counted(where)}. Change it in the "
+            "filter.</div>"
         )
 
         # --- Compare: the big button with the map beside it, then, once
@@ -4535,24 +4576,26 @@ if st.session_state["mode"] == "window":
             with map_col:
                 map_picker(spots, chosen, where)
             if chosen:
-                st.html(compare_table(order, spots, names, outlooks, totals, best, where,
-                                      length, bare))
-                st.caption("Days with your wind in a typical year of each spot's own record, in "
-                           "its own local time. A model cell smooths the wind over its area; a "
-                           "station measures it where it stands.")
+                with st.container(gap="small", key="cmp"):
+                    compare_table(order, spots, names, outlooks, totals, best, where, shown,
+                                  length, bare)
+                st.caption("Click a spot to see when to go there, and your dates in full, "
+                           "below. Days with your wind in a typical year of each spot's own "
+                           "record, in its own local time. A model cell smooths the wind over "
+                           "its area; a station measures it where it stands.")
         st.html(
             f'<a class="scroll-cue" href="#when-to-go">{DOWN_ARROW}'
             + ("Not comparing? " if not chosen else "")
-            + f"Scroll down for when to go to {html.escape(LOCATION_NAME)}</a>"
+            + f"Scroll down for when to go to {shown_name}</a>"
         )
 
-        # --- When to go: the best days of the year, then your dates ---
-        st.html(f'<div class="when-title" id="when-to-go">When to go to '
-                f"{html.escape(LOCATION_NAME)}</div>")
+        # --- When to go: the best days of the year, then your dates, at
+        # this spot or the one you clicked in the table ---
+        st.html(f'<div class="when-title" id="when-to-go">When to go to {shown_name}</div>')
         if chances is not None:
             window, expected = best_stretch(chances, length)
             better = rounded_days(expected, length)
-            yours = totals.get(where)
+            yours = totals.get(shown)
             stretch = "day" if length == 1 else f"{length} days"
             marks = [(dates, "Your dates", "#7dd3fc")]
             if yours is not None and (window == dates or better <= yours):
@@ -4575,22 +4618,23 @@ if st.session_state["mode"] == "window":
                 st.button(f"Plan for {dates_label(window)} instead", icon=":material/event:",
                           key="trip_best_dates", on_click=use_dates, args=(window,))
             st.altair_chart(season_chart(chances, marks), width="stretch")
-            st.caption(f"Each day of the year: how often it brought your wind in {years_text}, "
+            st.caption(f"Each day of the year: how often it brought your wind in "
+                       f"{years_counted(shown)}, "
                        "over the week round it. Shaded, your dates"
                        + (f" and the best {stretch}." if len(marks) > 1 else "."))
 
         # Your dates in full: four figures, every year on record, the wind
         # and the air beside the rose of where it comes from.
-        found = outlooks[where]
+        found = outlooks[shown]
         days = found["days"]
         st.html(f'<div class="dates-title">On your dates, {dates_label(dates)}</div>')
-        if where not in totals or found["knots"] is None:
+        if shown not in totals or found["knots"] is None:
             st.caption("No record on these dates here yet: pick other dates.")
         else:
             low, middle, high = found["knots"]
             figures = [
-                (bare(totals[where]), "of years with your wind") if length == 1
-                else (f"{totals[where]:g} of {length}", "days with your wind"),
+                (bare(totals[shown]), "of years with your wind") if length == 1
+                else (f"{totals[shown]:g} of {length}", "days with your wind"),
                 (f"{low:.0f}–{high:.0f} kt", beaufort(middle)),
                 (prevailing_direction(found["direction"]) if len(found["direction"]) else "–",
                  "wind from, in range"),

@@ -42,7 +42,8 @@ rest of your spots. The map fetches a new spot where you click, in the
 spot's own data or any other. The spots then stand side by side in one
 table, best first, each with how many more or fewer days it gets than
 yours. Below, When to go shows the best days of the year for your wind,
-with your dates marked, and then your dates in full.
+with your dates marked, and then your dates in full: at your spot, or at
+whichever spot you click in the table.
 
 A day counts, in the rating and in Compare alike, when your wind
 holds for your hours in a row, the direction swings no more than you
