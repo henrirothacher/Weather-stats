@@ -3996,9 +3996,11 @@ def season_chart(chances, marks):
         )
     curve = alt.Chart(rows).encode(
         x=at("date", month_axis),
-        y=alt.Y("pct:Q", title=None, scale=alt.Scale(domain=[0, top]),
-                axis=alt.Axis(tickCount=4, labelExpr="datum.value + '%'", ticks=False,
-                              domain=False, gridColor="#1e2533")),
+        y=alt.Y("pct:Q", title="Years with your wind", scale=alt.Scale(domain=[0, top]),
+                axis=alt.Axis(tickCount=4, labelExpr="datum.value + '%'", domain=True,
+                              domainColor="#4b5770", ticks=True, tickColor="#4b5770", tickSize=4,
+                              gridColor="#1e2533", titleColor="#8a94a8",
+                              titleFontWeight="normal", titlePadding=10)),
     )
     hover = alt.selection_point(name="day", on="pointerover", nearest=True, fields=["date"],
                                 empty=False, clear="pointerout")
