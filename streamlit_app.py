@@ -29,7 +29,7 @@ st.set_page_config(
 )
 
 # Goes up by 0.1 with every commit pushed to GitHub (3.0 -> 3.1).
-APP_VERSION = "3.4"
+APP_VERSION = "3.5"
 
 def svg_image(markup, view_box, css_class=""):
     """A drawing for st.html. Its sanitiser drops <svg> outright but lets an
@@ -3856,9 +3856,11 @@ BANDS = {
 }
 # Every calendar day of a year of no year in particular, 1 January first.
 YEAR_DAYS = window_days(((1, 1), (12, 31)))
-# The year's curve is drawn over a week round each day: one day of twenty
-# years is too few to read on its own.
-SMOOTH_DAYS = 7
+# The year's curve is drawn over the two weeks or so round each day, the
+# nearest counting most, in a bell curve this many days wide either way:
+# one day of twenty years is too few to read on its own, and a plain mean
+# over a week still jags.
+SMOOTH_SPREAD = 3
 
 
 @st.cache_data(show_spinner=False, max_entries=128)
@@ -3938,11 +3940,15 @@ def year_chances(path, mtime, zone, years_back, wind, lasting, hours, shift=None
     return pd.Series(share.to_numpy(dtype=float)).interpolate(limit_direction="both").to_numpy()
 
 
-def smoothed(values, width=SMOOTH_DAYS):
-    """The mean over `width` days centred on each, running on past New Year."""
-    half = width // 2
+def smoothed(values, spread=SMOOTH_SPREAD):
+    """A weighted mean over the days round each, the nearest counting most:
+    a bell curve `spread` days wide either way, cut off at three times that,
+    running on past New Year."""
+    half = 3 * spread
+    offsets = np.arange(-half, half + 1)
+    weights = np.exp(-offsets ** 2 / (2 * spread ** 2))
     looped = np.concatenate([values[-half:], values, values[:half]])
-    return np.convolve(looped, np.ones(width) / width, "valid")
+    return np.convolve(looped, weights / weights.sum(), "valid")
 
 
 def best_stretch(chances, length):
@@ -3961,8 +3967,8 @@ def best_stretch(chances, length):
 
 def season_chart(chances, marks):
     """The year as one curve, the share of years each day brought your wind
-    over the week round it, with `marks` shaded on it, each (window, label,
-    colour). Hover for any day."""
+    over the two weeks or so round it, with `marks` shaded on it, each
+    (window, label, colour). Hover for any day."""
     first = pd.Timestamp("2001-01-01")
     rows = pd.DataFrame({"date": pd.date_range(first, periods=len(YEAR_DAYS)),
                          "pct": smoothed(chances) * 100})
@@ -4622,7 +4628,8 @@ if st.session_state["mode"] == "window":
             st.altair_chart(season_chart(chances, marks), width="stretch")
             st.caption(f"Each day of the year: how often it brought your wind in "
                        f"{years_counted(shown)}, "
-                       "over the week round it. Shaded, your dates"
+                       "over the two weeks round it, the nearest days counting most. Shaded, "
+                       "your dates"
                        + (f" and the best {stretch}." if len(marks) > 1 else "."))
 
         # Your dates in full: four figures, every year on record, the wind
