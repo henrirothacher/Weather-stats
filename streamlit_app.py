@@ -3976,11 +3976,18 @@ def season_chart(chances, marks):
     span = alt.Scale(domain=[alt.DateTime(year=2001, month=1, date=1),
                              alt.DateTime(year=2002, month=1, date=1)])
 
-    def at(field, axis=None):
-        return alt.X(f"{field}:T", title=None, scale=span, axis=axis)
+    # The months along the bottom, each named after the tick it starts at.
+    # Every layer names this same axis: one left without it takes the months
+    # off the whole chart.
+    month_axis = alt.Axis(values=[alt.DateTime(year=2001, month=month, date=1)
+                                  for month in range(1, 13)],
+                          format="%b", labelAlign="left", labelPadding=6, grid=False,
+                          domain=True, domainColor="#4b5770", ticks=True, tickColor="#4b5770",
+                          tickSize=4)
 
-    month_axis = alt.Axis(format="%b", tickCount={"interval": "month", "step": 1},
-                          labelAlign="left", ticks=False, domain=False, grid=False)
+    def at(field):
+        return alt.X(f"{field}:T", title=None, scale=span, axis=month_axis)
+
     layers = []
     for row, (window, label, colour) in enumerate(marks):
         start, end = YEAR_DAYS.index(window[0]), YEAR_DAYS.index(window[1])
@@ -4001,7 +4008,7 @@ def season_chart(chances, marks):
             .encode(x=at("at"), y=alt.value(0), text="text:N")
         )
     curve = alt.Chart(rows).encode(
-        x=at("date", month_axis),
+        x=at("date"),
         y=alt.Y("pct:Q", title="Years with your wind", scale=alt.Scale(domain=[0, top]),
                 axis=alt.Axis(tickCount=4, labelExpr="datum.value + '%'", domain=True,
                               domainColor="#4b5770", ticks=True, tickColor="#4b5770", tickSize=4,
